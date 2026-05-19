@@ -1,0 +1,34 @@
+services:
+  - type: web
+    name: academic-assistant-bot
+    env: docker
+    dockerfilePath: Dockerfile
+    plan: free
+    healthCheckPath: /health
+    # We mount a disk so that your SQLite database and Media files aren't wiped when Render restarts
+    disk:
+      name: sqlite-data
+      mountPath: /app/data
+      sizeGB: 1
+    envVars:
+      - key: DATABASE_URL
+        value: sqlite+aiosqlite:////app/data/bot.db
+      - key: USE_POLLING
+        value: "True"
+      # These must be set securely in the Render Dashboard
+      - key: BOT_TOKEN
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: bot-redis
+          property: connectionString
+
+  - type: redis
+    name: bot-redis
+    ipAllowList: [] # only allow internal connections
+    plan: free

@@ -1,0 +1,40 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - bot_data:/app/data
+      - raw_storage:/app/app/storage/raw
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:///./data/bot.db
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+  # Uncomment for PostgreSQL production
+  # postgres:
+  #   image: postgres:16-alpine
+  #   environment:
+  #     POSTGRES_DB: academic_bot
+  #     POSTGRES_USER: bot_user
+  #     POSTGRES_PASSWORD: bot_password
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - pg_data:/var/lib/postgresql/data
+  #   restart: unless-stopped
+
+volumes:
+  redis_data:
+  bot_data:
+  raw_storage:
