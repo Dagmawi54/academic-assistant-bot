@@ -7,7 +7,7 @@ services:
     healthCheckPath: /health
     envVars:
       - key: DATABASE_URL
-        value: sqlite+aiosqlite:///bot.db
+        value: sqlite+aiosqlite:////tmp/bot.db
       - key: USE_POLLING
         value: "True"
       # These must be set securely in the Render Dashboard
