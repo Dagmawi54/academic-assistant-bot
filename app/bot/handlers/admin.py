@@ -1,7 +1,7 @@
 """Admin DM handler — FSM-driven configuration wizards."""
 
 from aiogram import Router, types, F
-from aiogram.filters import ChatTypeFilter
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,7 +36,7 @@ async def start_setup_group(
     await callback.answer()
 
 
-@router.message(SetupGroupStates.waiting_department, ChatTypeFilter(chat_type="private"))
+@router.message(SetupGroupStates.waiting_department, F.chat.type == "private")
 async def setup_receive_department(message: types.Message, state: FSMContext) -> None:
     """Receive group reference, then ask for department."""
     # Check if it's a forwarded message from a group
@@ -74,7 +74,7 @@ async def setup_receive_year(callback: types.CallbackQuery, state: FSMContext) -
     await callback.answer()
 
 
-@router.message(SetupGroupStates.waiting_section, ChatTypeFilter(chat_type="private"))
+@router.message(SetupGroupStates.waiting_section, F.chat.type == "private")
 async def setup_receive_section(message: types.Message, state: FSMContext) -> None:
     """Receive section, then ask for semester."""
     section = message.text.strip().upper()
@@ -200,7 +200,7 @@ async def course_group_selected(callback: types.CallbackQuery, state: FSMContext
     await callback.answer()
 
 
-@router.message(AddCourseStates.waiting_course_name, ChatTypeFilter(chat_type="private"))
+@router.message(AddCourseStates.waiting_course_name, F.chat.type == "private")
 async def course_name_received(
     message: types.Message, state: FSMContext, session: AsyncSession
 ) -> None:

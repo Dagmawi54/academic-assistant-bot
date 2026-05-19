@@ -1,7 +1,7 @@
 """Command handlers: /start, /help, /menu, /status."""
 
 from aiogram import Router, types, F
-from aiogram.filters import Command, ChatTypeFilter
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,7 +13,7 @@ from app.utils.text import escape_md
 router = Router(name="commands")
 
 
-@router.message(Command("start"), ChatTypeFilter(chat_type="private"))
+@router.message(Command("start"), F.chat.type == "private")
 async def cmd_start(message: types.Message, session: AsyncSession) -> None:
     """Welcome message + admin menu if applicable."""
     user_id = message.from_user.id
@@ -51,7 +51,7 @@ async def cmd_help(message: types.Message) -> None:
     await message.answer(text)
 
 
-@router.message(Command("menu"), ChatTypeFilter(chat_type="private"))
+@router.message(Command("menu"), F.chat.type == "private")
 async def cmd_menu(message: types.Message, session: AsyncSession) -> None:
     """Show admin menu (DM only)."""
     is_admin = await is_admin_in_any_group(session, message.from_user.id)
