@@ -22,19 +22,28 @@ def main() -> None:
 
 
 async def _run_polling() -> None:
-    """Run in polling mode (development)."""
+    """Run in polling mode (development or free-tier hosting)."""
     from app.bot.webhook import app as fastapi_app
     from app.bot import bot, dp
     from app.bot.webhook import lifespan
+    import os
+
+    port = int(os.environ.get("PORT", 8000))
+    config = uvicorn.Config(fastapi_app, host="0.0.0.0", port=port, log_level="info")
+    server = uvicorn.Server(config)
 
     # Manually trigger lifespan startup
     async with lifespan(fastapi_app):
-        # Start polling
-        print("🤖 Bot running in polling mode. Press Ctrl+C to stop.")
+        print("🤖 Bot running in polling mode alongside FastAPI server. Press Ctrl+C to stop.")
+        
+        polling_task = asyncio.create_task(dp.start_polling(bot, drop_pending_updates=True))
+        
         try:
-            await dp.start_polling(bot, drop_pending_updates=True)
+            await server.serve()
         except (KeyboardInterrupt, SystemExit):
             pass
+        finally:
+            polling_task.cancel()
 
 
 if __name__ == "__main__":
