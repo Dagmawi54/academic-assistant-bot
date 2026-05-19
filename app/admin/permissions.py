@@ -57,3 +57,41 @@ async def is_admin_in_any_group(session: AsyncSession, telegram_user_id: int) ->
     """Check if user is admin in any registered group (for DM menus)."""
     users = await crud.get_user_any_group(session, telegram_user_id)
     return any(u.role in ADMIN_ROLES for u in users)
+
+
+def require_role(allowed_roles: list[str]) -> Callable:
+    """Decorator that restricts a group command handler to specific roles.
+    
+    Usage:
+        @router.message(Command("review"))
+        @require_role(["creator", "administrator", "dept_admin"])
+        async def cmd_review(message, session): ...
+    """
+    def decorator(func: Callable) -> Callable:
+        @wraps(func)
+        async def wrapper(message: Any, *args: Any, **kwargs: Any) -> Any:
+            session = kwargs.get("session")
+            if session is None:
+                for arg in args:
+                    if isinstance(arg, AsyncSession):
+                        session = arg
+                        break
+
+            if session is None or message.from_user is None:
+                return
+
+            # Check Telegram's native admin status
+            chat_member = await message.chat.get_member(message.from_user.id)
+            tg_status = chat_member.status if chat_member else None
+
+            if tg_status in allowed_roles:
+                return await func(message, *args, **kwargs)
+
+            # Check our internal role system
+            user_role = await get_user_role(session, message.from_user.id, message.chat.id)
+            if user_role in allowed_roles:
+                return await func(message, *args, **kwargs)
+
+            await message.answer("❌ You don't have permission for this action.")
+        return wrapper
+    return decorator
