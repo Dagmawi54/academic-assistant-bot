@@ -57,7 +57,12 @@ async def cmd_menu(message: types.Message, session: AsyncSession) -> None:
     is_admin = await is_admin_in_any_group(session, message.from_user.id)
 
     if is_admin:
-        await message.answer("⚙️ *Admin Menu*", reply_markup=menus.main_menu())
+        managed = await crud.get_managed_groups(session, message.from_user.id)
+        group_names = ", ".join([escape_md(g.department) for g in managed if g.department]) or "None"
+        await message.answer(
+            f"⚙️ *Admin Menu*\n_Managing groups:_ {group_names}",
+            reply_markup=menus.main_menu(),
+        )
     else:
         text = (
             "⚠️ You don't have admin access to any registered active groups\\.\n\n"
@@ -110,4 +115,31 @@ async def cb_cancel(callback: types.CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
 
 
-# /version removed per user request (moved to admin menu buttons)
+@router.message(Command("ask"))
+async def cmd_ask(message: types.Message) -> None:
+    """Ask the AI a technical or general question."""
+    query = message.text.replace("/ask", "").strip()
+    if not query:
+        await message.answer("Please provide a question after the command, e.g. `/ask What is python?`", parse_mode="Markdown")
+        return
+
+    from app.ai.gemini_client import gemini_client
+    from app.ai.groq_client import groq_client
+    
+    # Send temporary processing message
+    status_msg = await message.answer("⏳ _Thinking..._")
+    
+    try:
+        # Try Groq first for speed
+        messages = [{"role": "system", "content": "You are a helpful academic and technical AI assistant. Keep responses reasonably concise and format nicely with Markdown."}, {"role": "user", "content": query}]
+        result = await groq_client.complete(messages)
+        if not result and gemini_client.is_configured:
+            # Fallback to Gemini
+            result = await gemini_client.complete("You are a helpful academic and technical AI assistant.", query)
+            
+        if result:
+            await status_msg.edit_text(result, parse_mode="Markdown")
+        else:
+            await status_msg.edit_text("❌ Sorry, I couldn't reach the AI services right now.")
+    except Exception as e:
+        await status_msg.edit_text(f"❌ Error processing question: {str(e)}")

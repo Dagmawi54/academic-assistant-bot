@@ -37,7 +37,7 @@ async def start_setup_group(
 
 
 @router.message(SetupGroupStates.waiting_department, F.chat.type == "private")
-async def setup_receive_department(message: types.Message, state: FSMContext) -> None:
+async def setup_receive_chat_id(message: types.Message, state: FSMContext) -> None:
     """Receive group reference, then ask for department."""
     # Check if it's a forwarded message from a group
     if message.forward_from_chat and message.forward_from_chat.id:
@@ -47,7 +47,7 @@ async def setup_receive_department(message: types.Message, state: FSMContext) ->
         chat_id = int(message.text)
         await state.update_data(chat_id=chat_id)
     else:
-        # First message is the department name if no chat_id yet
+        # If we already have chat_id, this is a custom department text input
         data = await state.get_data()
         if "chat_id" not in data:
             await message.answer(
@@ -59,7 +59,25 @@ async def setup_receive_department(message: types.Message, state: FSMContext) ->
         await message.answer("📅 Select the academic year:", reply_markup=menus.year_select())
         return
 
-    await message.answer(f"✅ Group registered: `{chat_id}`\n\nNow enter the *department name*:")
+    await message.answer(
+        f"✅ Group registered: `{chat_id}`\n\nSelect a *department* or type a custom one:",
+        reply_markup=menus.department_select()
+    )
+
+
+@router.callback_query(SetupGroupStates.waiting_department, F.data.startswith("dept:"))
+async def setup_receive_dept_cb(callback: types.CallbackQuery, state: FSMContext) -> None:
+    dept = callback.data.split(":")[1]
+    if dept == "custom":
+        await callback.message.edit_text("✏️ Type your custom department name:")
+    else:
+        await state.update_data(department=dept)
+        await state.set_state(SetupGroupStates.waiting_year)
+        await callback.message.edit_text(
+            f"Department *{escape_md(dept)}* selected\\.\n\n📅 Select the academic year:", 
+            reply_markup=menus.year_select()
+        )
+    await callback.answer()
 
 
 @router.callback_query(SetupGroupStates.waiting_year, F.data.startswith("year:"))
@@ -69,7 +87,7 @@ async def setup_receive_year(callback: types.CallbackQuery, state: FSMContext) -
     await state.update_data(year=year)
     await state.set_state(SetupGroupStates.waiting_section)
     await callback.message.edit_text(
-        f"Year *{year}* selected\\.\n\nNow enter the *section* \\(A, B, C, etc\\.\\):"
+        f"Year *{year}* selected\\.\n\nNow enter the *section* \\(A, B, 1, 2, etc\\.\\):"
     )
     await callback.answer()
 
@@ -552,7 +570,12 @@ async def cmd_promote(message: types.Message, session: AsyncSession) -> None:
 
     from app.database.models import User
 
-    existing = await crud.get_user(session, target_user.id, message.chat.id)
+    group = await crud.get_group_by_chat_id(session, message.chat.id)
+    if not group:
+        await message.answer("❌ This group is not registered.")
+        return
+
+    existing = await crud.get_user(session, target_user.id, group.id)
     if existing:
         await crud.update_fields(session, User, existing.id, role=role)
     else:
@@ -560,7 +583,7 @@ async def cmd_promote(message: types.Message, session: AsyncSession) -> None:
             session,
             User(
                 telegram_user_id=target_user.id,
-                group_id=message.chat.id,
+                group_id=group.id,
                 role=role,
                 username=target_user.username,
                 full_name=target_user.full_name,
@@ -599,7 +622,12 @@ async def cmd_demote(message: types.Message, session: AsyncSession) -> None:
 
     from app.database.models import User
 
-    existing = await crud.get_user(session, target_user.id, message.chat.id)
+    group = await crud.get_group_by_chat_id(session, message.chat.id)
+    if not group:
+        await message.answer("❌ This group is not registered.")
+        return
+
+    existing = await crud.get_user(session, target_user.id, group.id)
     if existing:
         await crud.update_fields(session, User, existing.id, role="student")
         await crud.log_action(

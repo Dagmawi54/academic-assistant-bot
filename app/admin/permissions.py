@@ -24,32 +24,35 @@ ADMIN_ROLES = {"owner", "dept_admin", "section_admin"}
 MODERATOR_ROLES = ADMIN_ROLES | {"moderator", "representative"}
 
 
-async def get_user_role(session: AsyncSession, telegram_user_id: int, group_id: int) -> str:
-    """Get a user's role in a specific group. Defaults to 'student'."""
-    user = await crud.get_user(session, telegram_user_id, group_id)
+async def get_user_role(session: AsyncSession, telegram_user_id: int, chat_id: int) -> str:
+    """Get a user's role in a specific group by chat_id. Defaults to 'student'."""
+    group = await crud.get_group_by_chat_id(session, chat_id)
+    if not group:
+        return "student"
+    user = await crud.get_user(session, telegram_user_id, group.id)
     return user.role if user else "student"
 
 
-async def is_admin(session: AsyncSession, telegram_user_id: int, group_id: int) -> bool:
+async def is_admin(session: AsyncSession, telegram_user_id: int, chat_id: int) -> bool:
     """Check if user has admin privileges in the group."""
-    role = await get_user_role(session, telegram_user_id, group_id)
+    role = await get_user_role(session, telegram_user_id, chat_id)
     return role in ADMIN_ROLES
 
 
-async def is_moderator(session: AsyncSession, telegram_user_id: int, group_id: int) -> bool:
+async def is_moderator(session: AsyncSession, telegram_user_id: int, chat_id: int) -> bool:
     """Check if user has moderator or higher privileges."""
-    role = await get_user_role(session, telegram_user_id, group_id)
+    role = await get_user_role(session, telegram_user_id, chat_id)
     return role in MODERATOR_ROLES
 
 
 async def has_role(
     session: AsyncSession,
     telegram_user_id: int,
-    group_id: int,
+    chat_id: int,
     required_role: str,
 ) -> bool:
     """Check if user's role meets or exceeds the required role level."""
-    actual = await get_user_role(session, telegram_user_id, group_id)
+    actual = await get_user_role(session, telegram_user_id, chat_id)
     return ROLE_HIERARCHY.get(actual, 0) >= ROLE_HIERARCHY.get(required_role, 0)
 
 

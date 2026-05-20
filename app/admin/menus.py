@@ -74,6 +74,17 @@ def group_select(groups: Sequence[Group], prefix: str = "group") -> InlineKeyboa
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
+def department_select() -> InlineKeyboardMarkup:
+    """Pre-set options for common departments + custom."""
+    buttons = [
+        [InlineKeyboardButton(text="💻 Computer Science", callback_data="dept:Computer Science")],
+        [InlineKeyboardButton(text="📊 Business Management", callback_data="dept:Business Management")],
+        [InlineKeyboardButton(text="⚙️ Engineering", callback_data="dept:Engineering")],
+        [InlineKeyboardButton(text="➕ Add Custom Department", callback_data="dept:custom")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
 def year_select() -> InlineKeyboardMarkup:
     """Select academic year (1-5)."""
     buttons = [
