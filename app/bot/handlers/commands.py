@@ -119,10 +119,12 @@ async def cb_cancel(callback: types.CallbackQuery, state: FSMContext) -> None:
 @router.message(Command("ask"))
 async def cmd_ask(message: types.Message) -> None:
     """Ask the AI a technical or general question."""
-    query = message.text.replace("/ask", "").strip()
-    if not query:
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2:
         await message.answer("Please provide a question after the command, e.g. `/ask What is python?`", parse_mode="Markdown")
         return
+        
+    query = args[1].strip()
 
     from app.ai.gemini_client import gemini_client
     from app.ai.groq_client import groq_client
@@ -139,7 +141,9 @@ async def cmd_ask(message: types.Message) -> None:
             result = await gemini_client.complete("You are a helpful academic and technical AI assistant.", query)
             
         if result:
-            await status_msg.edit_text(result, parse_mode="Markdown")
+            # Result is a dict from complete() like {"raw": "Here is the response..."}
+            ans = result.get("raw") or str(result)
+            await status_msg.edit_text(ans, parse_mode="Markdown")
         else:
             await status_msg.edit_text("❌ Sorry, I couldn't reach the AI services right now.")
     except Exception as e:

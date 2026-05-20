@@ -6,7 +6,7 @@ from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admin import menus
-from app.admin.states import SetupGroupStates, AddCourseStates, SemesterStates
+from app.admin.states import SetupGroupStates, AddCourseStates, SemesterStates, LinkTopicStates
 from app.database import crud
 from app.database.models import Group, Course, Topic, User
 from app.logging import get_logger
@@ -431,7 +431,7 @@ async def cb_menu_permissions(callback: types.CallbackQuery) -> None:
     await callback.answer()
 
 
-@router.callback_query(F.data.in_({"menu:link_topics", "menu:exam_coverage", "menu:announcements"}))
+@router.callback_query(F.data.in_({"menu:exam_coverage", "menu:announcements"}))
 async def placeholder_menu(callback: types.CallbackQuery) -> None:
     """Placeholder for features to be implemented."""
     await callback.message.edit_text(
@@ -440,6 +440,100 @@ async def placeholder_menu(callback: types.CallbackQuery) -> None:
     )
     await callback.answer()
 
+
+# =====================================================================
+# LINK TOPICS WIZARD
+# =====================================================================
+
+@router.callback_query(F.data == "menu:link_topics")
+async def start_link_topics(
+    callback: types.CallbackQuery, state: FSMContext, session: AsyncSession
+) -> None:
+    """Begin topic linking."""
+    users = await crud.get_user_any_group(session, callback.from_user.id)
+    admin_groups = [u.group_id for u in users if u.role in {"owner", "dept_admin", "section_admin"}]
+
+    if not admin_groups:
+        await callback.message.edit_text("⚠️ No groups found\\.", reply_markup=menus.back_button())
+        await callback.answer()
+        return
+
+    groups = []
+    for gid in admin_groups:
+        g = await crud.get_by_id(session, Group, gid)
+        if g:
+            groups.append(g)
+
+    if len(groups) == 1:
+        await state.update_data(group_id=groups[0].id)
+        # Fetch courses
+        courses = await crud.get_active_courses(session, groups[0].id)
+        if not courses:
+            await callback.message.edit_text("⚠️ No active courses found in this group\\.", reply_markup=menus.back_button())
+            return
+        await state.set_state(LinkTopicStates.waiting_course_select)
+        await callback.message.edit_text("📚 Select the *course* you want to link:", reply_markup=menus.course_select(courses))
+    else:
+        await state.set_state(LinkTopicStates.waiting_group_select)
+        await callback.message.edit_text(
+            "📚 Select the group:", reply_markup=menus.group_select(groups)
+        )
+    await callback.answer()
+
+@router.callback_query(LinkTopicStates.waiting_group_select, F.data.startswith("group:"))
+async def link_group_selected(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
+    group_id = int(callback.data.split(":")[1])
+    await state.update_data(group_id=group_id)
+    courses = await crud.get_active_courses(session, group_id)
+    if not courses:
+        await callback.message.edit_text("⚠️ No active courses found in this group\\.", reply_markup=menus.back_button())
+        return
+    await state.set_state(LinkTopicStates.waiting_course_select)
+    await callback.message.edit_text("📚 Select the *course* you want to link:", reply_markup=menus.course_select(courses))
+    await callback.answer()
+
+@router.callback_query(LinkTopicStates.waiting_course_select, F.data.startswith("course:"))
+async def link_course_selected(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
+    course_id = int(callback.data.split(":")[1])
+    await state.update_data(course_id=course_id)
+    
+    data = await state.get_data()
+    topics = await crud.get_active_topics(session, data["group_id"])
+    if not topics:
+        await callback.message.edit_text("⚠️ No active topics found in this group\\.", reply_markup=menus.back_button())
+        return
+    
+    await state.set_state(LinkTopicStates.waiting_topic_select)
+    await callback.message.edit_text("💬 Select the *topic* to link to this course:", reply_markup=menus.topic_select(topics))
+    await callback.answer()
+
+@router.callback_query(LinkTopicStates.waiting_topic_select, F.data.startswith("topic:"))
+async def link_topic_selected(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
+    topic_id = int(callback.data.split(":")[1])
+    data = await state.get_data()
+    
+    course_id = data["course_id"]
+    from app.database.models import Course, Topic
+    
+    await crud.update_fields(session, Course, course_id, topic_id=topic_id)
+    await crud.update_fields(session, Topic, topic_id, topic_type="course")
+    
+    course = await crud.get_by_id(session, Course, course_id)
+    title = course.course_name if course else "Unknown"
+
+    await crud.log_action(
+        session,
+        action="topic_linked",
+        telegram_user_id=callback.from_user.id,
+        details=f"course_id={course_id} topic_id={topic_id}"
+    )
+    
+    await state.clear()
+    await callback.message.edit_text(
+        f"✅ Successfully linked course *{escape_md(title)}* to the selected topic\\!",
+        reply_markup=menus.back_button()
+    )
+    await callback.answer()
 
 from aiogram.filters import Command
 from app.admin.permissions import require_role
