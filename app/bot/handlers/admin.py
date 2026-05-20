@@ -6,7 +6,7 @@ from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admin import menus
-from app.admin.states import SetupGroupStates, AddCourseStates, SemesterStates, LinkTopicStates
+from app.admin.states import SetupGroupStates, AddCourseStates, SemesterStates
 from app.database import crud
 from app.database.models import Group, Course, Topic, User
 from app.logging import get_logger
@@ -232,17 +232,34 @@ async def course_name_received(
     # Fetch active topics for linking
     topics = await crud.get_active_topics(session, group_id)
     if not topics:
-        await state.set_state(AddCourseStates.confirm)
+        # No topics available — create course without linking, offer add another
+        group = await crud.get_by_id(session, Group, group_id)
+        course = Course(
+            group_id=group_id,
+            course_name=course_name,
+            semester=group.semester or 1,
+        )
+        await crud.create(session, course)
+
+        await crud.log_action(
+            session,
+            action="course_created",
+            telegram_user_id=message.from_user.id,
+            details=f"course={course_name} (no topics available)",
+        )
+
+        await state.set_state(AddCourseStates.waiting_course_name)
         await message.answer(
-            f"Course *{escape_md(course_name)}* will be created without a linked topic\\.\n"
-            f"You can link a topic later\\.",
-            reply_markup=menus.confirm_action("create_course"),
+            f"✅ Course *{escape_md(course_name)}* created\\!\n"
+            f"\\(No forum topics found to link\\)\n\n"
+            f"📚 Enter another *course name* or press Cancel:",
+            reply_markup=menus.cancel_only(),
         )
     else:
         await state.set_state(AddCourseStates.waiting_topic_select)
         await message.answer(
-            f"Link *{escape_md(course_name)}* to a topic:",
-            reply_markup=menus.topic_select(topics),
+            f"🔗 Link *{escape_md(course_name)}* to a forum topic:",
+            reply_markup=menus.topic_select_with_skip(topics),
         )
 
 
@@ -273,19 +290,21 @@ async def course_topic_selected(
         details=f"course={data['course_name']} topic_id={topic_id}",
     )
 
-    await state.clear()
+    # Offer to add another course
+    await state.set_state(AddCourseStates.waiting_course_name)
     await callback.message.edit_text(
-        f"✅ Course *{escape_md(data['course_name'])}* created and linked\\!",
-        reply_markup=menus.back_button(),
+        f"✅ Course *{escape_md(data['course_name'])}* created and linked\\!\n\n"
+        f"📚 Enter another *course name* or press Cancel:",
+        reply_markup=menus.cancel_only(),
     )
     await callback.answer()
 
 
-@router.callback_query(AddCourseStates.confirm, F.data.startswith("confirm:"))
-async def course_confirm_no_topic(
+@router.callback_query(AddCourseStates.waiting_topic_select, F.data == "skip_topic")
+async def course_skip_topic(
     callback: types.CallbackQuery, state: FSMContext, session: AsyncSession
 ) -> None:
-    """Create course without topic link."""
+    """Create course without linking a topic."""
     data = await state.get_data()
     group = await crud.get_by_id(session, Group, data["group_id"])
 
@@ -296,10 +315,19 @@ async def course_confirm_no_topic(
     )
     await crud.create(session, course)
 
-    await state.clear()
+    await crud.log_action(
+        session,
+        action="course_created",
+        telegram_user_id=callback.from_user.id,
+        details=f"course={data['course_name']} (skipped topic)",
+    )
+
+    # Offer to add another course
+    await state.set_state(AddCourseStates.waiting_course_name)
     await callback.message.edit_text(
-        f"✅ Course *{escape_md(data['course_name'])}* created \\(no topic linked\\)\\.",
-        reply_markup=menus.back_button(),
+        f"✅ Course *{escape_md(data['course_name'])}* created \\(no topic linked\\)\\!\n\n"
+        f"📚 Enter another *course name* or press Cancel:",
+        reply_markup=menus.cancel_only(),
     )
     await callback.answer()
 
@@ -437,101 +465,6 @@ async def placeholder_menu(callback: types.CallbackQuery) -> None:
     await callback.message.edit_text(
         "🚧 This feature is coming soon\\!",
         reply_markup=menus.back_button(),
-    )
-    await callback.answer()
-
-
-# =====================================================================
-# LINK TOPICS WIZARD
-# =====================================================================
-
-@router.callback_query(F.data == "menu:link_topics")
-async def start_link_topics(
-    callback: types.CallbackQuery, state: FSMContext, session: AsyncSession
-) -> None:
-    """Begin topic linking."""
-    users = await crud.get_user_any_group(session, callback.from_user.id)
-    admin_groups = [u.group_id for u in users if u.role in {"owner", "dept_admin", "section_admin"}]
-
-    if not admin_groups:
-        await callback.message.edit_text("⚠️ No groups found\\.", reply_markup=menus.back_button())
-        await callback.answer()
-        return
-
-    groups = []
-    for gid in admin_groups:
-        g = await crud.get_by_id(session, Group, gid)
-        if g:
-            groups.append(g)
-
-    if len(groups) == 1:
-        await state.update_data(group_id=groups[0].id)
-        # Fetch courses
-        courses = await crud.get_active_courses(session, groups[0].id)
-        if not courses:
-            await callback.message.edit_text("⚠️ No active courses found in this group\\.", reply_markup=menus.back_button())
-            return
-        await state.set_state(LinkTopicStates.waiting_course_select)
-        await callback.message.edit_text("📚 Select the *course* you want to link:", reply_markup=menus.course_select(courses))
-    else:
-        await state.set_state(LinkTopicStates.waiting_group_select)
-        await callback.message.edit_text(
-            "📚 Select the group:", reply_markup=menus.group_select(groups)
-        )
-    await callback.answer()
-
-@router.callback_query(LinkTopicStates.waiting_group_select, F.data.startswith("group:"))
-async def link_group_selected(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
-    group_id = int(callback.data.split(":")[1])
-    await state.update_data(group_id=group_id)
-    courses = await crud.get_active_courses(session, group_id)
-    if not courses:
-        await callback.message.edit_text("⚠️ No active courses found in this group\\.", reply_markup=menus.back_button())
-        return
-    await state.set_state(LinkTopicStates.waiting_course_select)
-    await callback.message.edit_text("📚 Select the *course* you want to link:", reply_markup=menus.course_select(courses))
-    await callback.answer()
-
-@router.callback_query(LinkTopicStates.waiting_course_select, F.data.startswith("course:"))
-async def link_course_selected(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
-    course_id = int(callback.data.split(":")[1])
-    await state.update_data(course_id=course_id)
-    
-    data = await state.get_data()
-    topics = await crud.get_active_topics(session, data["group_id"])
-    if not topics:
-        await callback.message.edit_text("⚠️ No active topics found in this group\\.", reply_markup=menus.back_button())
-        return
-    
-    await state.set_state(LinkTopicStates.waiting_topic_select)
-    await callback.message.edit_text("💬 Select the *topic* to link to this course:", reply_markup=menus.topic_select(topics))
-    await callback.answer()
-
-@router.callback_query(LinkTopicStates.waiting_topic_select, F.data.startswith("topic:"))
-async def link_topic_selected(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
-    topic_id = int(callback.data.split(":")[1])
-    data = await state.get_data()
-    
-    course_id = data["course_id"]
-    from app.database.models import Course, Topic
-    
-    await crud.update_fields(session, Course, course_id, topic_id=topic_id)
-    await crud.update_fields(session, Topic, topic_id, topic_type="course")
-    
-    course = await crud.get_by_id(session, Course, course_id)
-    title = course.course_name if course else "Unknown"
-
-    await crud.log_action(
-        session,
-        action="topic_linked",
-        telegram_user_id=callback.from_user.id,
-        details=f"course_id={course_id} topic_id={topic_id}"
-    )
-    
-    await state.clear()
-    await callback.message.edit_text(
-        f"✅ Successfully linked course *{escape_md(title)}* to the selected topic\\!",
-        reply_markup=menus.back_button()
     )
     await callback.answer()
 
@@ -740,7 +673,7 @@ async def cmd_demote(message: types.Message, session: AsyncSession) -> None:
 
 @router.message(Command("sync_admin"))
 async def cmd_sync_admin(message: types.Message, session: AsyncSession) -> None:
-    """Sync Telegram native admin status to internal DB."""
+    """Sync Telegram native admin status to internal DB. Auto-creates group if needed."""
     if message.chat.type not in ("group", "supergroup"):
         await message.answer("❌ This command must be used inside a group.")
         return
@@ -750,10 +683,19 @@ async def cmd_sync_admin(message: types.Message, session: AsyncSession) -> None:
         await message.answer("❌ You are not a Telegram administrator in this group.")
         return
 
+    # Auto-create the group record if it doesn't exist yet
     group = await crud.get_group_by_chat_id(session, message.chat.id)
     if not group:
-        await message.answer("❌ This group is not registered.")
-        return
+        group = Group(
+            chat_id=message.chat.id,
+            active=True,
+        )
+        group = await crud.create(session, group)
+        await message.answer(
+            f"📋 Group registered (chat\_id: `{message.chat.id}`)\n"
+            f"Use `/menu` in my DMs to configure department, year, and section.",
+            parse_mode="Markdown",
+        )
 
     role = "owner" if chat_member.status == "creator" else "dept_admin"
     from app.database.models import User
@@ -762,7 +704,7 @@ async def cmd_sync_admin(message: types.Message, session: AsyncSession) -> None:
     if existing:
         if existing.role in ("student", "moderator", "representative"):
             await crud.update_fields(session, User, existing.id, role=role)
-            await message.answer(f"✅ Your role has been updated to `{role}` in the database.", parse_mode="Markdown")
+            await message.answer(f"✅ Your role has been updated to `{role}`.", parse_mode="Markdown")
         else:
             await message.answer(f"✅ You are already synced as `{existing.role}`.", parse_mode="Markdown")
     else:
@@ -776,7 +718,7 @@ async def cmd_sync_admin(message: types.Message, session: AsyncSession) -> None:
                 full_name=message.from_user.full_name,
             ),
         )
-        await message.answer(f"✅ You have been successfully registered as `{role}`! You can now use `/menu` in my DMs.", parse_mode="Markdown")
+        await message.answer(f"✅ Registered as `{role}`! Use `/menu` in my DMs to manage this group.", parse_mode="Markdown")
 
 
 @router.callback_query(F.data == "menu:audit")

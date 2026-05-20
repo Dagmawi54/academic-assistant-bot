@@ -1,4 +1,4 @@
-"""Command handlers: /start, /help, /menu, /status."""
+"""Command handlers: /start, /help, /menu, /status, /ask."""
 
 from aiogram import Router, types, F
 from aiogram.filters import Command
@@ -46,7 +46,9 @@ async def cmd_help(message: types.Message) -> None:
         "`/start` — Start the bot\n"
         "`/help` — Show this message\n"
         "`/menu` — Open admin menu \\(DM only\\)\n"
-        "`/status` — Show group info"
+        "`/status` — Show group info\n"
+        "`/ask` — Ask the AI a question\n"
+        "`/sync_admin` — Sync your admin role \\(in group\\)"
     )
     await message.answer(text)
 
@@ -126,25 +128,49 @@ async def cmd_ask(message: types.Message) -> None:
         
     query = args[1].strip()
 
-    from app.ai.gemini_client import gemini_client
     from app.ai.groq_client import groq_client
     
     # Send temporary processing message
-    status_msg = await message.answer("⏳ _Thinking..._")
+    status_msg = await message.answer("⏳ Thinking...")
     
     try:
         # Try Groq first for speed
-        messages = [{"role": "system", "content": "You are a helpful academic and technical AI assistant. Keep responses reasonably concise and format nicely with Markdown."}, {"role": "user", "content": query}]
+        messages = [
+            {"role": "system", "content": "You are a helpful academic and technical AI assistant. Keep responses reasonably concise."},
+            {"role": "user", "content": query},
+        ]
         result = await groq_client.complete(messages)
-        if not result and gemini_client.is_configured:
-            # Fallback to Gemini
-            result = await gemini_client.complete("You are a helpful academic and technical AI assistant.", query)
-            
+
+        answer_text = None
         if result:
-            # Result is a dict from complete() like {"raw": "Here is the response..."}
-            ans = result.get("raw") or str(result)
-            await status_msg.edit_text(ans, parse_mode="Markdown")
+            answer_text = result.get("raw") or None
+
+        # If Groq failed or returned empty, try Gemini
+        if not answer_text:
+            try:
+                from app.ai.gemini_client import gemini_client
+                if gemini_client.is_configured:
+                    gem_result = await gemini_client.complete(
+                        "You are a helpful academic and technical AI assistant.", query
+                    )
+                    if gem_result:
+                        answer_text = gem_result.get("raw") or None
+            except Exception:
+                pass
+
+        if answer_text:
+            # Truncate if too long for Telegram (4096 char limit)
+            if len(answer_text) > 4000:
+                answer_text = answer_text[:4000] + "\n\n... (truncated)"
+            try:
+                await status_msg.edit_text(answer_text, parse_mode="Markdown")
+            except Exception:
+                # If Markdown parsing fails, send as plain text
+                await status_msg.edit_text(answer_text)
         else:
-            await status_msg.edit_text("❌ Sorry, I couldn't reach the AI services right now.")
+            await status_msg.edit_text("❌ Sorry, I couldn't reach the AI services right now. Check that API keys are configured.")
     except Exception as e:
-        await status_msg.edit_text(f"❌ Error processing question: {str(e)}")
+        try:
+            await status_msg.edit_text(f"❌ Error: {str(e)[:200]}")
+        except Exception:
+            pass

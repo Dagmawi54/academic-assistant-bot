@@ -29,7 +29,6 @@ def cat_infrastructure() -> InlineKeyboardMarkup:
     buttons = [
         [InlineKeyboardButton(text="📋 Setup Group", callback_data="menu:setup_group")],
         [InlineKeyboardButton(text="📚 Add Course", callback_data="menu:add_course")],
-        [InlineKeyboardButton(text="🔗 Link Topics", callback_data="menu:link_topics")],
         [InlineKeyboardButton(text="📅 Semester Control", callback_data="menu:semester")],
         [InlineKeyboardButton(text="⬅️ Back", callback_data="menu:main")],
     ]
@@ -114,6 +113,24 @@ def topic_select(topics: Sequence[Topic]) -> InlineKeyboardMarkup:
         buttons.append([InlineKeyboardButton(text=label, callback_data=f"topic:{t.id}")])
     buttons.append([InlineKeyboardButton(text="❌ Cancel", callback_data="cancel")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def topic_select_with_skip(topics: Sequence[Topic]) -> InlineKeyboardMarkup:
+    """Select from available active topics, with a 'Skip' option."""
+    buttons = []
+    for t in topics:
+        label = f"💬 {t.topic_name}"
+        buttons.append([InlineKeyboardButton(text=label, callback_data=f"topic:{t.id}")])
+    buttons.append([InlineKeyboardButton(text="⏩ Skip (no link)", callback_data="skip_topic")])
+    buttons.append([InlineKeyboardButton(text="❌ Cancel", callback_data="cancel")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def cancel_only() -> InlineKeyboardMarkup:
+    """Just a cancel/done button."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="✅ Done Adding Courses", callback_data="cancel")]]
+    )
 
 
 def course_select(courses: Sequence[Course]) -> InlineKeyboardMarkup:
