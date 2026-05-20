@@ -1,7 +1,7 @@
 """Admin DM handler — FSM-driven configuration wizards."""
 
 from aiogram import Router, types, F
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -45,6 +45,12 @@ async def setup_receive_chat_id(message: types.Message, state: FSMContext) -> No
         await state.update_data(chat_id=chat_id)
     elif message.text and message.text.lstrip("-").isdigit():
         chat_id = int(message.text)
+        # Normalize: Telegram supergroup chat_ids are always negative (-100...)
+        # If user enters a positive number, prepend -100
+        if chat_id > 0:
+            chat_id = int(f"-100{chat_id}")
+        elif chat_id < 0 and not str(chat_id).startswith("-100"):
+            chat_id = int(f"-100{abs(chat_id)}")
         await state.update_data(chat_id=chat_id)
     else:
         # If we already have chat_id, this is a custom department text input
@@ -719,6 +725,86 @@ async def cmd_sync_admin(message: types.Message, session: AsyncSession) -> None:
             ),
         )
         await message.answer(f"✅ Registered as `{role}`! Use `/menu` in my DMs to manage this group.", parse_mode="Markdown")
+
+    # Also register the current topic if typed from a thread
+    if message.message_thread_id:
+        from app.database.models import Topic
+        existing_topic = await crud.get_topic(session, message.chat.id, message.message_thread_id)
+        if not existing_topic:
+            new_topic = Topic(
+                group_id=group.id,
+                chat_id=message.chat.id,
+                message_thread_id=message.message_thread_id,
+                topic_name=f"Topic {message.message_thread_id}",
+                topic_type="ignored",
+                status="active",
+            )
+            await crud.create(session, new_topic)
+            await message.answer("📌 This topic has been registered too!", parse_mode="Markdown")
+
+
+@router.message(Command("scan_topics"), StateFilter("*"))
+async def cmd_scan_topics(message: types.Message, state: FSMContext, session: AsyncSession) -> None:
+    """Register the current forum topic in the database.
+    Users should type this command in each topic they want to make available for course linking.
+    """
+    await state.clear()
+    if message.chat.type not in ("group", "supergroup"):
+        await message.answer("❌ This command must be used inside a group topic.")
+        return
+
+    group = await crud.get_group_by_chat_id(session, message.chat.id)
+    if not group:
+        await message.answer("❌ This group is not registered. Type `/sync_admin` first.", parse_mode="Markdown")
+        return
+
+    thread_id = message.message_thread_id
+    if not thread_id:
+        # They're in the General topic
+        from app.database.models import Topic
+        general = await crud.get_general_topic(session, group.id)
+        if not general:
+            new_topic = Topic(
+                group_id=group.id,
+                chat_id=message.chat.id,
+                message_thread_id=0,
+                topic_name="General",
+                topic_type="general",
+                status="active",
+            )
+            await crud.create(session, new_topic)
+        await message.answer("✅ General topic registered!")
+        return
+
+    from app.database.models import Topic
+    existing = await crud.get_topic(session, message.chat.id, thread_id)
+    if existing:
+        await message.answer(f"✅ This topic is already registered as `{existing.topic_name}`.", parse_mode="Markdown")
+        return
+
+    # Try to get topic name from chat
+    topic_name = f"Topic {thread_id}"
+    try:
+        # In forums, we can try to get the topic name via get_forum_topic
+        # but Bot API doesn't have a direct method. Use a reasonable default.
+        pass
+    except Exception:
+        pass
+
+    new_topic = Topic(
+        group_id=group.id,
+        chat_id=message.chat.id,
+        message_thread_id=thread_id,
+        topic_name=topic_name,
+        topic_type="ignored",
+        status="active",
+    )
+    await crud.create(session, new_topic)
+    await message.answer(
+        f"✅ Topic registered as `{topic_name}`!\n"
+        f"You can now link it to a course via Add Course in `/menu`.",
+        parse_mode="Markdown",
+    )
 
 
 @router.callback_query(F.data == "menu:audit")
