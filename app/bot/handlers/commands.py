@@ -67,6 +67,7 @@ async def cmd_menu(message: types.Message, session: AsyncSession) -> None:
         text = (
             "⚠️ You don't have admin access to any registered active groups\\.\n\n"
             "If you are simply a student reading announcements, you don't need this menu\\!\n\n"
+            "If you are a Telegram administrator in a registered group, go to that group and type `/sync_admin` first\\.\n\n"
             "If you just added me to a *new* group and want to become the Owner to manage it, click below to set it up:"
         )
         await message.answer(text, reply_markup=menus.unregistered_menu())

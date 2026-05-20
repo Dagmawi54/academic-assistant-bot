@@ -644,6 +644,47 @@ async def cmd_demote(message: types.Message, session: AsyncSession) -> None:
         await message.answer(f"⚠️ User {target_user.full_name} is already a student/unregistered.")
 
 
+@router.message(Command("sync_admin"))
+async def cmd_sync_admin(message: types.Message, session: AsyncSession) -> None:
+    """Sync Telegram native admin status to internal DB."""
+    if message.chat.type not in ("group", "supergroup"):
+        await message.answer("❌ This command must be used inside a group.")
+        return
+
+    chat_member = await message.chat.get_member(message.from_user.id)
+    if not chat_member or chat_member.status not in ("creator", "administrator"):
+        await message.answer("❌ You are not a Telegram administrator in this group.")
+        return
+
+    group = await crud.get_group_by_chat_id(session, message.chat.id)
+    if not group:
+        await message.answer("❌ This group is not registered.")
+        return
+
+    role = "owner" if chat_member.status == "creator" else "dept_admin"
+    from app.database.models import User
+    
+    existing = await crud.get_user(session, message.from_user.id, group.id)
+    if existing:
+        if existing.role in ("student", "moderator", "representative"):
+            await crud.update_fields(session, User, existing.id, role=role)
+            await message.answer(f"✅ Your role has been updated to `{role}` in the database.", parse_mode="Markdown")
+        else:
+            await message.answer(f"✅ You are already synced as `{existing.role}`.", parse_mode="Markdown")
+    else:
+        await crud.create(
+            session,
+            User(
+                telegram_user_id=message.from_user.id,
+                group_id=group.id,
+                role=role,
+                username=message.from_user.username,
+                full_name=message.from_user.full_name,
+            ),
+        )
+        await message.answer(f"✅ You have been successfully registered as `{role}`! You can now use `/menu` in my DMs.", parse_mode="Markdown")
+
+
 @router.callback_query(F.data == "menu:audit")
 async def cb_menu_audit(callback: types.CallbackQuery, session: AsyncSession) -> None:
     groups = await crud.get_managed_groups(session, callback.from_user.id)
