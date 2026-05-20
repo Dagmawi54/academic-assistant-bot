@@ -420,10 +420,23 @@ async def semester_do_close(
     await callback.answer()
 
 
-# =====================================================================
-# PLACEHOLDER CALLBACKS for remaining menu items
-# =====================================================================
+@router.callback_query(F.data.in_({
+    "menu:exam_coverage", 
+    "menu:announcements", 
+    "menu:targeted_push", 
+    "menu:view_dms"
+}))
+async def placeholder_menu(callback: types.CallbackQuery) -> None:
+    """Placeholder for features to be implemented."""
+    await callback.message.edit_text(
+        "🚧 This feature is coming soon\\!",
+        reply_markup=menus.back_button(),
+    )
+    await callback.answer()
 
+# =====================================================================
+# CATEGORY MENUS
+# =====================================================================
 
 @router.callback_query(F.data == "menu:cat_infrastructure")
 async def cb_cat_infrastructure(callback: types.CallbackQuery) -> None:
