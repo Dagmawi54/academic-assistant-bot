@@ -129,7 +129,7 @@ def topic_select_with_skip(topics: Sequence[Topic]) -> InlineKeyboardMarkup:
 def cancel_only() -> InlineKeyboardMarkup:
     """Just a cancel/done button."""
     return InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text="✅ Done Adding Courses", callback_data="cancel")]]
+        inline_keyboard=[[InlineKeyboardButton(text="✅ Done Adding Courses", callback_data="done_adding_courses")]]
     )
 
 

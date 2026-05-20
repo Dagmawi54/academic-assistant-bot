@@ -33,8 +33,13 @@ class ThrottleMiddleware(BaseMiddleware):
         last = self._timestamps.get(user_id, 0.0)
 
         if now - last < settings.throttle_rate:
-            logger.debug("throttled", user_id=user_id)
-            return None  # Silently drop
+            # Bypass throttle for explicit slash commands so users don't get frustrated
+            if event.text and event.text.startswith("/"):
+                # We still update timestamp below, but we don't drop it
+                pass
+            else:
+                logger.debug("throttled", user_id=user_id)
+                return None  # Silently drop
 
         self._timestamps[user_id] = now
         return await handler(event, data)

@@ -338,6 +338,17 @@ async def course_skip_topic(
     await callback.answer()
 
 
+@router.callback_query(F.data == "done_adding_courses", StateFilter("*"))
+async def cb_done_adding_courses(callback: types.CallbackQuery, state: FSMContext) -> None:
+    """End the add course loop gracefully."""
+    await state.clear()
+    await callback.message.edit_text(
+        "✅ Courses saved\\. Use `/menu` to configure more\\.",
+        reply_markup=menus.back_button(),
+    )
+    await callback.answer()
+
+
 # =====================================================================
 # SEMESTER CONTROL
 # =====================================================================
@@ -782,15 +793,12 @@ async def cmd_scan_topics(message: types.Message, state: FSMContext, session: As
         await message.answer(f"✅ This topic is already registered as `{existing.topic_name}`.", parse_mode="Markdown")
         return
 
-    # Try to get topic name from chat
+    # Try to get topic name from chat or command args
     topic_name = f"Topic {thread_id}"
-    try:
-        # In forums, we can try to get the topic name via get_forum_topic
-        # but Bot API doesn't have a direct method. Use a reasonable default.
-        pass
-    except Exception:
-        pass
-
+    args = message.text.split(maxsplit=1)
+    if len(args) > 1:
+        topic_name = args[1].strip()
+        
     new_topic = Topic(
         group_id=group.id,
         chat_id=message.chat.id,
