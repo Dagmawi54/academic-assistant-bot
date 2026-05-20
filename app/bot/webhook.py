@@ -52,13 +52,18 @@ async def lifespan(application: FastAPI):  # noqa: ANN201, ARG001
     # Webhook or polling
     if settings.use_polling:
         logger.info("polling_mode", msg="Using polling (dev mode)")
-        # Polling is started after yield via main.py
+        import asyncio
+        polling_task = asyncio.create_task(dp.start_polling(bot, drop_pending_updates=True))
     else:
         webhook_url = settings.webhook_url
         await bot.set_webhook(webhook_url, drop_pending_updates=True)
         logger.info("webhook_set", url=webhook_url)
 
     yield
+
+    # Cancel polling task on shutdown
+    if settings.use_polling and polling_task:
+        polling_task.cancel()
 
     # --- Shutdown ---
     logger.info("shutting_down")
