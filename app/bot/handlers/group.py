@@ -12,6 +12,42 @@ logger = get_logger("group_handler")
 router = Router(name="group")
 
 
+@router.message(F.forum_topic_created)
+async def handle_topic_created(message: types.Message, session: AsyncSession) -> None:
+    """Register newly created forum topics in the database."""
+    from app.database import crud
+    from app.database.models import Topic
+
+    group = await crud.get_group_by_chat_id(session, message.chat.id)
+    if not group:
+        return
+
+    topic = Topic(
+        group_id=group.id,
+        chat_id=message.chat.id,
+        message_thread_id=message.message_thread_id,
+        topic_name=message.forum_topic_created.name,
+        topic_type="ignored",  # Default to ignored until linked
+        status="active"
+    )
+    await crud.create(session, topic)
+    logger.info("topic_created_registered", topic_name=message.forum_topic_created.name)
+
+
+@router.message(F.forum_topic_edited)
+async def handle_topic_edited(message: types.Message, session: AsyncSession) -> None:
+    """Update topic name if edited."""
+    from app.database import crud
+    from app.database.models import Topic
+    
+    if not message.forum_topic_edited.name:
+        return
+        
+    topic = await crud.get_topic(session, message.chat.id, message.message_thread_id)
+    if topic:
+        await crud.update_fields(session, Topic, topic.id, topic_name=message.forum_topic_edited.name)
+
+
 @router.message(
     F.chat.type.in_({ChatType.GROUP, ChatType.SUPERGROUP}),
 )
@@ -46,6 +82,27 @@ async def handle_group_message(message: types.Message, session: AsyncSession) ->
     text = message.text or message.caption or ""
     user_id = message.from_user.id if message.from_user else None
     message_id = message.message_id
+
+    # Auto-register unknown topics for backward compatibility
+    if thread_id:
+        topic = await crud.get_topic(session, chat_id, thread_id)
+        if not topic:
+            from app.database.models import Topic
+            
+            # If the user replies to the main topic creation message, it sometimes has the title
+            topic_name = f"Topic {thread_id}"
+            if message.reply_to_message and message.reply_to_message.forum_topic_created:
+                topic_name = message.reply_to_message.forum_topic_created.name
+                
+            new_topic = Topic(
+                group_id=group.id,
+                chat_id=chat_id,
+                message_thread_id=thread_id,
+                topic_name=topic_name,
+                topic_type="ignored",
+                status="active"
+            )
+            await crud.create(session, new_topic)
 
     os.makedirs("app/storage/raw", exist_ok=True)
 
