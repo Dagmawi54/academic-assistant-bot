@@ -17,6 +17,14 @@ def main_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
+def unregistered_menu() -> InlineKeyboardMarkup:
+    """Menu shown to users with no admin access, letting them set up a group."""
+    buttons = [
+        [InlineKeyboardButton(text="📋 Setup a New Group", callback_data="menu:setup_group")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
 def cat_infrastructure() -> InlineKeyboardMarkup:
     buttons = [
         [InlineKeyboardButton(text="📋 Setup Group", callback_data="menu:setup_group")],

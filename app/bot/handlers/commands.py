@@ -59,10 +59,12 @@ async def cmd_menu(message: types.Message, session: AsyncSession) -> None:
     if is_admin:
         await message.answer("⚙️ *Admin Menu*", reply_markup=menus.main_menu())
     else:
-        await message.answer(
-            "⚠️ You don't have admin access to any registered group\\.\n\n"
-            "Ask your group owner to assign you a role\\."
+        text = (
+            "⚠️ You don't have admin access to any registered active groups\\.\n\n"
+            "If you are simply a student reading announcements, you don't need this menu\\!\n\n"
+            "If you just added me to a *new* group and want to become the Owner to manage it, click below to set it up:"
         )
+        await message.answer(text, reply_markup=menus.unregistered_menu())
 
 
 @router.message(Command("status"))
