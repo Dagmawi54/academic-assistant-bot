@@ -17,6 +17,11 @@ services:
         sync: false
       - key: GEMINI_API_KEY
         sync: false
+      - key: RENDER_EXTERNAL_URL
+        fromService:
+          type: web
+          name: academic-assistant-bot
+          property: url
       - key: REDIS_URL
         fromService:
           type: redis

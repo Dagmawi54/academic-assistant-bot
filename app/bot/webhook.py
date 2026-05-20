@@ -49,6 +49,12 @@ async def lifespan(application: FastAPI):  # noqa: ANN201, ARG001
     await start_scheduler()
     logger.info("scheduler_started")
 
+    # Keep-alive self-ping (prevents Render free-tier sleep)
+    from app.utils.keep_alive import start_keep_alive
+
+    start_keep_alive(settings.render_external_url)
+    logger.info("keep_alive_checked")
+
     # Webhook or polling
     if settings.use_polling:
         logger.info("polling_mode", msg="Using polling (dev mode)")
@@ -68,7 +74,9 @@ async def lifespan(application: FastAPI):  # noqa: ANN201, ARG001
     # --- Shutdown ---
     logger.info("shutting_down")
     from app.reminders.scheduler import stop_scheduler
+    from app.utils.keep_alive import stop_keep_alive
 
+    stop_keep_alive()
     stop_scheduler()
 
     if not settings.use_polling:

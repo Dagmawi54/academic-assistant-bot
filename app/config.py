@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     throttle_rate: float = 0.5  # min seconds between messages per user
     ai_requests_per_minute: int = 30
 
+    # Render keep-alive (auto-provided by Render for web services)
+    render_external_url: str = Field("", alias="RENDER_EXTERNAL_URL")
+
     # Reminder defaults (hours before deadline)
     reminder_offsets_hours: list[int] = [48, 24, 0]
 
