@@ -1,7 +1,11 @@
-"""Command handlers: /start, /help, /menu, /status, /ask."""
+"""Command handlers: /start, /help, /menu, /status, /ask.
+
+All commands use StateFilter("*") so they work even when
+the user is in the middle of an FSM wizard (e.g. Add Course).
+"""
 
 from aiogram import Router, types, F
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,9 +17,11 @@ from app.utils.text import escape_md
 router = Router(name="commands")
 
 
-@router.message(Command("start"), F.chat.type == "private")
-async def cmd_start(message: types.Message, session: AsyncSession) -> None:
+# ---------- /start ----------
+@router.message(Command("start"), StateFilter("*"), F.chat.type == "private")
+async def cmd_start(message: types.Message, state: FSMContext, session: AsyncSession) -> None:
     """Welcome message + admin menu if applicable."""
+    await state.clear()
     user_id = message.from_user.id
     name = escape_md(message.from_user.first_name or "there")
 
@@ -38,9 +44,11 @@ async def cmd_start(message: types.Message, session: AsyncSession) -> None:
         await message.answer(text)
 
 
-@router.message(Command("help"))
-async def cmd_help(message: types.Message) -> None:
+# ---------- /help ----------
+@router.message(Command("help"), StateFilter("*"))
+async def cmd_help(message: types.Message, state: FSMContext) -> None:
     """Show available commands."""
+    await state.clear()
     text = (
         "*Available Commands*\n\n"
         "`/start` — Start the bot\n"
@@ -53,9 +61,11 @@ async def cmd_help(message: types.Message) -> None:
     await message.answer(text)
 
 
-@router.message(Command("menu"), F.chat.type == "private")
-async def cmd_menu(message: types.Message, session: AsyncSession) -> None:
+# ---------- /menu ----------
+@router.message(Command("menu"), StateFilter("*"), F.chat.type == "private")
+async def cmd_menu(message: types.Message, state: FSMContext, session: AsyncSession) -> None:
     """Show admin menu (DM only)."""
+    await state.clear()
     is_admin = await is_admin_in_any_group(session, message.from_user.id)
 
     if is_admin:
@@ -75,9 +85,11 @@ async def cmd_menu(message: types.Message, session: AsyncSession) -> None:
         await message.answer(text, reply_markup=menus.unregistered_menu())
 
 
-@router.message(Command("status"))
-async def cmd_status(message: types.Message, session: AsyncSession) -> None:
+# ---------- /status ----------
+@router.message(Command("status"), StateFilter("*"))
+async def cmd_status(message: types.Message, state: FSMContext, session: AsyncSession) -> None:
     """Show current group/semester status."""
+    await state.clear()
     chat_id = message.chat.id
     group = await crud.get_group_by_chat_id(session, chat_id)
 
@@ -100,6 +112,7 @@ async def cmd_status(message: types.Message, session: AsyncSession) -> None:
     await message.answer(text)
 
 
+# ---------- Callback: back to main menu ----------
 @router.callback_query(F.data == "menu:main")
 async def cb_main_menu(callback: types.CallbackQuery) -> None:
     """Return to main admin menu."""
@@ -107,7 +120,8 @@ async def cb_main_menu(callback: types.CallbackQuery) -> None:
     await callback.answer()
 
 
-@router.callback_query(F.data == "cancel")
+# ---------- Callback: cancel any wizard ----------
+@router.callback_query(F.data == "cancel", StateFilter("*"))
 async def cb_cancel(callback: types.CallbackQuery, state: FSMContext) -> None:
     """Cancel any active FSM flow."""
     await state.clear()
@@ -118,25 +132,33 @@ async def cb_cancel(callback: types.CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
 
 
-@router.message(Command("ask"))
-async def cmd_ask(message: types.Message) -> None:
+# ---------- /ask ----------
+@router.message(Command("ask"), StateFilter("*"))
+async def cmd_ask(message: types.Message, state: FSMContext) -> None:
     """Ask the AI a technical or general question."""
+    await state.clear()
     args = message.text.split(maxsplit=1)
     if len(args) < 2:
-        await message.answer("Please provide a question after the command, e.g. `/ask What is python?`", parse_mode="Markdown")
+        await message.answer(
+            "Please provide a question after the command, e.g. `/ask What is python?`",
+            parse_mode="Markdown",
+        )
         return
-        
+
     query = args[1].strip()
 
     from app.ai.groq_client import groq_client
-    
+
     # Send temporary processing message
     status_msg = await message.answer("⏳ Thinking...")
-    
+
     try:
         # Try Groq first for speed
         messages = [
-            {"role": "system", "content": "You are a helpful academic and technical AI assistant. Keep responses reasonably concise."},
+            {
+                "role": "system",
+                "content": "You are a helpful academic and technical AI assistant. Keep responses reasonably concise.",
+            },
             {"role": "user", "content": query},
         ]
         result = await groq_client.complete(messages)
@@ -149,6 +171,7 @@ async def cmd_ask(message: types.Message) -> None:
         if not answer_text:
             try:
                 from app.ai.gemini_client import gemini_client
+
                 if gemini_client.is_configured:
                     gem_result = await gemini_client.complete(
                         "You are a helpful academic and technical AI assistant.", query
@@ -168,7 +191,9 @@ async def cmd_ask(message: types.Message) -> None:
                 # If Markdown parsing fails, send as plain text
                 await status_msg.edit_text(answer_text)
         else:
-            await status_msg.edit_text("❌ Sorry, I couldn't reach the AI services right now. Check that API keys are configured.")
+            await status_msg.edit_text(
+                "❌ Sorry, I couldn't reach the AI services right now. Check that API keys are configured."
+            )
     except Exception as e:
         try:
             await status_msg.edit_text(f"❌ Error: {str(e)[:200]}")
