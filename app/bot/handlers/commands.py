@@ -6,6 +6,7 @@ the user is in the middle of an FSM wizard (e.g. Add Course).
 
 from aiogram import Router, types, F
 from aiogram.filters import Command, StateFilter
+from aiogram.fsm.state import any_state
 from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,7 +19,7 @@ router = Router(name="commands")
 
 
 # ---------- /start ----------
-@router.message(Command("start"), StateFilter("*"), F.chat.type == "private")
+@router.message(Command("start"), StateFilter(any_state), F.chat.type == "private")
 async def cmd_start(message: types.Message, state: FSMContext, session: AsyncSession) -> None:
     """Welcome message + admin menu if applicable."""
     await state.clear()
@@ -45,7 +46,7 @@ async def cmd_start(message: types.Message, state: FSMContext, session: AsyncSes
 
 
 # ---------- /help ----------
-@router.message(Command("help"), StateFilter("*"))
+@router.message(Command("help"), StateFilter(any_state))
 async def cmd_help(message: types.Message, state: FSMContext) -> None:
     """Show available commands."""
     await state.clear()
@@ -62,7 +63,7 @@ async def cmd_help(message: types.Message, state: FSMContext) -> None:
 
 
 # ---------- /menu ----------
-@router.message(Command("menu"), StateFilter("*"), F.chat.type == "private")
+@router.message(Command("menu"), StateFilter(any_state), F.chat.type == "private")
 async def cmd_menu(message: types.Message, state: FSMContext, session: AsyncSession) -> None:
     """Show admin menu (DM only)."""
     await state.clear()
@@ -86,7 +87,7 @@ async def cmd_menu(message: types.Message, state: FSMContext, session: AsyncSess
 
 
 # ---------- /status ----------
-@router.message(Command("status"), StateFilter("*"))
+@router.message(Command("status"), StateFilter(any_state))
 async def cmd_status(message: types.Message, state: FSMContext, session: AsyncSession) -> None:
     """Show current group/semester status."""
     await state.clear()
@@ -121,7 +122,7 @@ async def cb_main_menu(callback: types.CallbackQuery) -> None:
 
 
 # ---------- Callback: cancel any wizard ----------
-@router.callback_query(F.data == "cancel", StateFilter("*"))
+@router.callback_query(F.data == "cancel", StateFilter(any_state))
 async def cb_cancel(callback: types.CallbackQuery, state: FSMContext) -> None:
     """Cancel any active FSM flow."""
     await state.clear()
@@ -133,7 +134,7 @@ async def cb_cancel(callback: types.CallbackQuery, state: FSMContext) -> None:
 
 
 # ---------- /ask ----------
-@router.message(Command("ask"), StateFilter("*"))
+@router.message(Command("ask"), StateFilter(any_state))
 async def cmd_ask(message: types.Message, state: FSMContext) -> None:
     """Ask the AI a technical or general question."""
     await state.clear()

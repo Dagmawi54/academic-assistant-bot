@@ -2,6 +2,7 @@
 
 from aiogram import Router, types, F
 from aiogram.filters import Command, StateFilter
+from aiogram.fsm.state import any_state
 from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -338,7 +339,7 @@ async def course_skip_topic(
     await callback.answer()
 
 
-@router.callback_query(F.data == "done_adding_courses", StateFilter("*"))
+@router.callback_query(F.data == "done_adding_courses", StateFilter(any_state))
 async def cb_done_adding_courses(callback: types.CallbackQuery, state: FSMContext) -> None:
     """End the add course loop gracefully."""
     await state.clear()
@@ -758,7 +759,7 @@ async def cmd_sync_admin(message: types.Message, session: AsyncSession) -> None:
             await message.answer("📌 This topic has been registered too!", parse_mode="Markdown")
 
 
-@router.message(Command("scan_topics"), StateFilter("*"))
+@router.message(Command("scan_topics"), StateFilter(any_state))
 async def cmd_scan_topics(message: types.Message, state: FSMContext, session: AsyncSession) -> None:
     """Register the current forum topic in the database.
     Users should type this command in each topic they want to make available for course linking.
