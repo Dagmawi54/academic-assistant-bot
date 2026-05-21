@@ -487,14 +487,7 @@ async def cb_menu_permissions(callback: types.CallbackQuery) -> None:
     await callback.answer()
 
 
-@router.callback_query(F.data.in_({"menu:exam_coverage", "menu:announcements"}))
-async def placeholder_menu(callback: types.CallbackQuery) -> None:
-    """Placeholder for features to be implemented."""
-    await callback.message.edit_text(
-        "🚧 This feature is coming soon\\!",
-        reply_markup=menus.back_button(),
-    )
-    await callback.answer()
+
 
 from aiogram.filters import Command
 from app.admin.permissions import require_role
