@@ -422,8 +422,6 @@ async def semester_do_close(
 
 @router.callback_query(F.data.in_({
     "menu:exam_coverage", 
-    "menu:announcements", 
-    "menu:targeted_push", 
     "menu:view_dms"
 }))
 async def placeholder_menu(callback: types.CallbackQuery) -> None:
