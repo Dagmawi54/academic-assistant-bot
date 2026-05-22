@@ -28,6 +28,17 @@ class Settings(BaseSettings):
             url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
         return url
 
+    @property
+    def sync_database_url(self) -> str:
+        url = self.database_url
+        if url.startswith("sqlite+aiosqlite"):
+            url = url.replace("sqlite+aiosqlite", "sqlite", 1)
+        elif url.startswith("postgres://"):
+            url = url.replace("postgres://", "postgresql+psycopg2://", 1)
+        elif url.startswith("postgresql://"):
+            url = url.replace("postgresql://", "postgresql+psycopg2://", 1)
+        return url
+
     # Redis
     redis_url: str = Field("redis://localhost:6379/0", alias="REDIS_URL")
 

@@ -10,8 +10,8 @@ from app.logging import get_logger
 
 logger = get_logger("scheduler")
 
-# Use synchronous SQLite URL for APScheduler (it handles its own connections)
-_job_store_url = settings.database_url.replace("+aiosqlite", "").replace("+asyncpg", "+psycopg2")
+# Use synchronous database URL for APScheduler (it handles its own connections)
+_job_store_url = settings.sync_database_url
 
 scheduler = AsyncIOScheduler(
     jobstores={
