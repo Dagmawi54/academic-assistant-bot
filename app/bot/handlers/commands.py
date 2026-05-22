@@ -141,8 +141,8 @@ async def cmd_ask(message: types.Message, state: FSMContext) -> None:
     args = message.text.split(maxsplit=1)
     if len(args) < 2:
         await message.answer(
-            "Please provide a question after the command, e.g. `/ask What is python?`",
-            parse_mode="Markdown",
+            "Please provide a question after the command, e.g. /ask What is python?",
+            parse_mode=None,
         )
         return
 
@@ -150,8 +150,8 @@ async def cmd_ask(message: types.Message, state: FSMContext) -> None:
 
     from app.ai.groq_client import groq_client
 
-    # Send temporary processing message
-    status_msg = await message.answer("⏳ Thinking...")
+    # Send temporary processing message (plain text to avoid MarkdownV2 crash)
+    status_msg = await message.answer("⏳ Thinking...", parse_mode=None)
 
     try:
         # Try Groq first for speed
@@ -190,13 +190,18 @@ async def cmd_ask(message: types.Message, state: FSMContext) -> None:
                 await status_msg.edit_text(answer_text, parse_mode="Markdown")
             except Exception:
                 # If Markdown parsing fails, send as plain text
-                await status_msg.edit_text(answer_text)
+                try:
+                    await status_msg.edit_text(answer_text, parse_mode=None)
+                except Exception:
+                    await status_msg.edit_text("Got a response but couldn't display it.", parse_mode=None)
         else:
             await status_msg.edit_text(
-                "❌ Sorry, I couldn't reach the AI services right now. Check that API keys are configured."
+                "Sorry, I couldn't reach the AI services right now. "
+                "Check that GROQ_API_KEY or GEMINI_API_KEY env vars are configured on Render.",
+                parse_mode=None,
             )
     except Exception as e:
         try:
-            await status_msg.edit_text(f"❌ Error: {str(e)[:200]}")
+            await status_msg.edit_text(f"Error: {str(e)[:200]}", parse_mode=None)
         except Exception:
             pass
