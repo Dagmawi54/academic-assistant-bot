@@ -107,7 +107,7 @@ COURSE_PATTERNS = re.compile(
 
 # Date patterns
 DATE_PATTERNS = [
-    re.compile(r"\b(\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4})\b"),
+    re.compile(r"\b(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\b"),
     re.compile(
         r"\b((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s+\d{1,2}(?:\s*,?\s*\d{4})?)\b",
         re.IGNORECASE,
@@ -120,7 +120,7 @@ DATE_PATTERNS = [
 
 # Room patterns
 ROOM_PATTERN = re.compile(
-    r"\b(?:room|hall|venue|class)\s*[:\-]?\s*([A-Z]?\d{1,4}[A-Z]?)\b",
+    r"\b(?:room|hall|venue|class)\s*[:-]?\s*([A-Z]?\d{1,4}[A-Z]?)\b",
     re.IGNORECASE,
 )
 
@@ -242,9 +242,9 @@ def _extract_room(text: str) -> str | None:
 def _extract_coverage(text: str) -> str | None:
     """Extract coverage/chapter information."""
     patterns = [
-        re.compile(r"chapter[s]?\s*[:\-]?\s*(.+?)(?:\.|$)", re.IGNORECASE),
-        re.compile(r"covers?\s+(.+?)(?:\.|$)", re.IGNORECASE),
-        re.compile(r"ch\.?\s*(\d[\d\s,\-&and]+)", re.IGNORECASE),
+        re.compile(r"chapter[s]?\s*[:-]?\s*(.+?)(?:.|$)", re.IGNORECASE),
+        re.compile(r"covers?\s+(.+?)(?:.|$)", re.IGNORECASE),
+        re.compile(r"ch.?\s*(\d[\d\s,-&and]+)", re.IGNORECASE),
     ]
     for p in patterns:
         match = p.search(text)

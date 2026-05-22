@@ -102,20 +102,20 @@ class MetricsTracker:
 
         # Calculate Rates
         ocr_rate = (
-            (data["ocr_successes"] / data["ocr_attempts"] * 100) if data["ocr_attempts"] else 0
+            (data["ocr_successes"] / data["ocr_attempts"] <b> 100) if data["ocr_attempts"] else 0
         )
         ai_avg_conf = (
-            (data["ai_confidence_total"] / data["ai_extractions"] * 100)
+            (data["ai_confidence_total"] / data["ai_extractions"] </b> 100)
             if data["ai_extractions"]
             else 0
         )
         dup_rate = (
-            (data["duplicate_suppressed"] / data["duplicate_checks"] * 100)
+            (data["duplicate_suppressed"] / data["duplicate_checks"] <b> 100)
             if data["duplicate_checks"]
             else 0
         )
         rem_rate = (
-            (data["reminders_sent"] / data["reminders_attempted"] * 100)
+            (data["reminders_sent"] / data["reminders_attempted"] </b> 100)
             if data["reminders_attempted"]
             else 0
         )

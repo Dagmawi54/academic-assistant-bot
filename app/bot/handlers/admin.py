@@ -30,9 +30,9 @@ async def start_setup_group(
     """Begin group setup — ask for group chat ID or forward a message from the group."""
     await state.set_state(SetupGroupStates.waiting_department)
     await callback.message.edit_text(
-        "📋 *Group Setup*\n\n"
+        "📋 <b>Group Setup</b>\n\n"
         "First, forward any message from the group you want to set up, "
-        "or send the group chat ID\\.",
+        "or send the group chat ID\.",
     )
     await callback.answer()
 
@@ -58,7 +58,7 @@ async def setup_receive_chat_id(message: types.Message, state: FSMContext) -> No
         data = await state.get_data()
         if "chat_id" not in data:
             await message.answer(
-                "Please forward a message from the target group or send the chat ID first\\."
+                "Please forward a message from the target group or send the chat ID first\."
             )
             return
         await state.update_data(department=message.text)
@@ -67,7 +67,7 @@ async def setup_receive_chat_id(message: types.Message, state: FSMContext) -> No
         return
 
     await message.answer(
-        f"✅ Group registered: `{chat_id}`\n\nSelect a *department* or type a custom one:",
+        f"✅ Group registered: <code>{chat_id}</code>\n\nSelect a <b>department</b> or type a custom one:",
         reply_markup=menus.department_select()
     )
 
@@ -81,7 +81,7 @@ async def setup_receive_dept_cb(callback: types.CallbackQuery, state: FSMContext
         await state.update_data(department=dept)
         await state.set_state(SetupGroupStates.waiting_year)
         await callback.message.edit_text(
-            f"Department *{escape_md(dept)}* selected\\.\n\n📅 Select the academic year:", 
+            f"Department <b>{escape_md(dept)}</b> selected\.\n\n📅 Select the academic year:", 
             reply_markup=menus.year_select()
         )
     await callback.answer()
@@ -94,7 +94,7 @@ async def setup_receive_year(callback: types.CallbackQuery, state: FSMContext) -
     await state.update_data(year=year)
     await state.set_state(SetupGroupStates.waiting_section)
     await callback.message.edit_text(
-        f"Year *{year}* selected\\.\n\nNow enter the *section* \\(A, B, 1, 2, etc\\.\\):"
+        f"Year <b>{year}</b> selected\.\n\nNow enter the <b>section</b> \\(A, B, 1, 2, etc\.\\):"
     )
     await callback.answer()
 
@@ -106,7 +106,7 @@ async def setup_receive_section(message: types.Message, state: FSMContext) -> No
     await state.update_data(section=section)
     await state.set_state(SetupGroupStates.waiting_semester)
     await message.answer(
-        f"Section *{escape_md(section)}* set\\.\n\nSelect the current semester:",
+        f"Section <b>{escape_md(section)}</b> set\.\n\nSelect the current semester:",
         reply_markup=menus.semester_select(),
     )
 
@@ -169,12 +169,12 @@ async def setup_receive_semester(
 
     await state.clear()
     await callback.message.edit_text(
-        f"✅ *Group configured\\!*\n\n"
-        f"`Department` {escape_md(department)}\n"
-        f"`Year` {year}\n"
-        f"`Section` {escape_md(section)}\n"
-        f"`Semester` {semester}\n\n"
-        f"Next, add courses and link topics\\.",
+        f"✅ <b>Group configured\!</b>\n\n"
+        f"<code>Department</code> {escape_md(department)}\n"
+        f"<code>Year</code> {year}\n"
+        f"<code>Section</code> {escape_md(section)}\n"
+        f"<code>Semester</code> {semester}\n\n"
+        f"Next, add courses and link topics\.",
         reply_markup=menus.back_button(),
     )
     await callback.answer()
@@ -194,7 +194,7 @@ async def start_add_course(
     admin_groups = [u.group_id for u in users if u.role in {"owner", "dept_admin", "section_admin"}]
 
     if not admin_groups:
-        await callback.message.edit_text("⚠️ No groups found\\.", reply_markup=menus.back_button())
+        await callback.message.edit_text("⚠️ No groups found\.", reply_markup=menus.back_button())
         await callback.answer()
         return
 
@@ -257,15 +257,15 @@ async def course_name_received(
 
         await state.set_state(AddCourseStates.waiting_course_name)
         await message.answer(
-            f"✅ Course *{escape_md(course_name)}* created\\!\n"
+            f"✅ Course <b>{escape_md(course_name)}</b> created\!\n"
             f"\\(No forum topics found to link\\)\n\n"
-            f"📚 Enter another *course name* or press Cancel:",
+            f"📚 Enter another <b>course name</b> or press Cancel:",
             reply_markup=menus.cancel_only(),
         )
     else:
         await state.set_state(AddCourseStates.waiting_topic_select)
         await message.answer(
-            f"🔗 Link *{escape_md(course_name)}* to a forum topic:",
+            f"🔗 Link <b>{escape_md(course_name)}</b> to a forum topic:",
             reply_markup=menus.topic_select_with_skip(topics),
         )
 
@@ -300,8 +300,8 @@ async def course_topic_selected(
     # Offer to add another course
     await state.set_state(AddCourseStates.waiting_course_name)
     await callback.message.edit_text(
-        f"✅ Course *{escape_md(data['course_name'])}* created and linked\\!\n\n"
-        f"📚 Enter another *course name* or press Cancel:",
+        f"✅ Course <b>{escape_md(data['course_name'])}</b> created and linked\!\n\n"
+        f"📚 Enter another <b>course name</b> or press Cancel:",
         reply_markup=menus.cancel_only(),
     )
     await callback.answer()
@@ -332,8 +332,8 @@ async def course_skip_topic(
     # Offer to add another course
     await state.set_state(AddCourseStates.waiting_course_name)
     await callback.message.edit_text(
-        f"✅ Course *{escape_md(data['course_name'])}* created \\(no topic linked\\)\\!\n\n"
-        f"📚 Enter another *course name* or press Cancel:",
+        f"✅ Course <b>{escape_md(data['course_name'])}</b> created \\(no topic linked\\)\!\n\n"
+        f"📚 Enter another <b>course name</b> or press Cancel:",
         reply_markup=menus.cancel_only(),
     )
     await callback.answer()
@@ -344,7 +344,7 @@ async def cb_done_adding_courses(callback: types.CallbackQuery, state: FSMContex
     """End the add course loop gracefully."""
     await state.clear()
     await callback.message.edit_text(
-        "✅ Courses saved\\. Use `/menu` to configure more\\.",
+        "✅ Courses saved\. Use <code>/menu</code> to configure more\.",
         reply_markup=menus.back_button(),
     )
     await callback.answer()
@@ -358,7 +358,7 @@ async def cb_done_adding_courses(callback: types.CallbackQuery, state: FSMContex
 @router.callback_query(F.data == "menu:semester")
 async def start_semester(callback: types.CallbackQuery, state: FSMContext) -> None:
     await state.set_state(SemesterStates.waiting_action)
-    await callback.message.edit_text("📅 *Semester Control*", reply_markup=menus.semester_actions())
+    await callback.message.edit_text("📅 <b>Semester Control</b>", reply_markup=menus.semester_actions())
     await callback.answer()
 
 
@@ -371,7 +371,7 @@ async def semester_confirm_close(
     admin_groups = [u.group_id for u in users if u.role in {"owner", "dept_admin", "section_admin"}]
 
     if not admin_groups:
-        await callback.message.edit_text("⚠️ No groups found\\.", reply_markup=menus.back_button())
+        await callback.message.edit_text("⚠️ No groups found\.", reply_markup=menus.back_button())
         await callback.answer()
         return
 
@@ -381,8 +381,8 @@ async def semester_confirm_close(
     await state.set_state(SemesterStates.confirm_close)
 
     await callback.message.edit_text(
-        f"⚠️ Close semester *{group.semester}* for "
-        f"*{escape_md(group.department or '')}* Y{group.year} S{escape_md(group.section or '')}\\?\n\n"
+        f"⚠️ Close semester <b>{group.semester}</b> for "
+        f"<b>{escape_md(group.department or '')}</b> Y{group.year} S{escape_md(group.section or '')}\\?\n\n"
         "This will:\n"
         "• Close all current course topics\n"
         "• Cancel pending reminders\n"
@@ -413,9 +413,9 @@ async def semester_do_close(
 
     await state.clear()
     await callback.message.edit_text(
-        "🔒 *Semester closed\\!*\n\n"
-        "All topics closed, courses deactivated, reminders cancelled\\.\n"
-        "Use the menu to set up a new semester\\.",
+        "🔒 <b>Semester closed\!</b>\n\n"
+        "All topics closed, courses deactivated, reminders cancelled\.\n"
+        "Use the menu to set up a new semester\.",
         reply_markup=menus.back_button(),
     )
     await callback.answer()
@@ -428,7 +428,7 @@ async def semester_do_close(
 async def placeholder_menu(callback: types.CallbackQuery) -> None:
     """Placeholder for features to be implemented."""
     await callback.message.edit_text(
-        "🚧 This feature is coming soon\\!",
+        "🚧 This feature is coming soon\!",
         reply_markup=menus.back_button(),
     )
     await callback.answer()
@@ -440,7 +440,7 @@ async def placeholder_menu(callback: types.CallbackQuery) -> None:
 @router.callback_query(F.data == "menu:cat_infrastructure")
 async def cb_cat_infrastructure(callback: types.CallbackQuery) -> None:
     await callback.message.edit_text(
-        "🏢 *Infrastructure*", reply_markup=menus.cat_infrastructure(), parse_mode="Markdown"
+        "🏢 <b>Infrastructure</b>", reply_markup=menus.cat_infrastructure(), parse_mode="HTML"
     )
     await callback.answer()
 
@@ -448,7 +448,7 @@ async def cb_cat_infrastructure(callback: types.CallbackQuery) -> None:
 @router.callback_query(F.data == "menu:cat_communications")
 async def cb_cat_communications(callback: types.CallbackQuery) -> None:
     await callback.message.edit_text(
-        "📢 *Communications*", reply_markup=menus.cat_communications(), parse_mode="Markdown"
+        "📢 <b>Communications</b>", reply_markup=menus.cat_communications(), parse_mode="HTML"
     )
     await callback.answer()
 
@@ -456,9 +456,9 @@ async def cb_cat_communications(callback: types.CallbackQuery) -> None:
 @router.callback_query(F.data == "menu:cat_administration")
 async def cb_cat_administration(callback: types.CallbackQuery) -> None:
     await callback.message.edit_text(
-        "⚙️ *Administration Settings*",
+        "⚙️ <b>Administration Settings</b>",
         reply_markup=menus.cat_administration(),
-        parse_mode="Markdown",
+        parse_mode="HTML",
     )
     await callback.answer()
 
@@ -466,7 +466,7 @@ async def cb_cat_administration(callback: types.CallbackQuery) -> None:
 @router.callback_query(F.data == "menu:cat_analytics")
 async def cb_cat_analytics(callback: types.CallbackQuery) -> None:
     await callback.message.edit_text(
-        "📊 *Analytics & Logs*", reply_markup=menus.cat_analytics(), parse_mode="Markdown"
+        "📊 <b>Analytics & Logs</b>", reply_markup=menus.cat_analytics(), parse_mode="HTML"
     )
     await callback.answer()
 
@@ -474,16 +474,16 @@ async def cb_cat_analytics(callback: types.CallbackQuery) -> None:
 @router.callback_query(F.data == "menu:permissions")
 async def cb_menu_permissions(callback: types.CallbackQuery) -> None:
     text = (
-        "👥 *Managing Permissions*\n\n"
+        "👥 <b>Managing Permissions</b>\n\n"
         "To promote or demote a user, perform these steps inside the group:\n"
-        "1\\. Go to the target group\\.\n"
-        "2\\. Reply to the user's message\\.\n"
-        "3\\. Type `/promote <role>` or `/demote`\\.\n\n"
-        "*Available Roles:*\n"
-        "`dept_admin`, `section_admin`, `moderator`"
+        "1\. Go to the target group\.\n"
+        "2\. Reply to the user's message\.\n"
+        "3\. Type <code>/promote <role></code> or <code>/demote</code>\.\n\n"
+        "<b>Available Roles:</b>\n"
+        "<code>dept_admin</code>, <code>section_admin</code>, <code>moderator</code>"
     )
     await callback.message.edit_text(
-        text, reply_markup=menus.back_button(), parse_mode="MarkdownV2"
+        text, reply_markup=menus.back_button(), parse_mode="HTML"
     )
     await callback.answer()
 
@@ -524,14 +524,14 @@ async def cmd_review_items(message: types.Message, session: AsyncSession) -> Non
         kb.button(text="❌ Reject", callback_data=f"review_reject:{item.id}")
 
         text = (
-            f"🔍 *Pending Review*\n"
+            f"🔍 <b>Pending Review</b>\n"
             f"Type: {item.item_type.upper()}\n"
             f"Title: {item.title}\n"
             f"Confidence: {item.confidence:.2f}\n"
             f"Deadline: {item.deadline}\n"
             f"Text snippet: {item.raw_text[:100]}..."
         )
-        await message.answer(text, reply_markup=kb.as_markup(), parse_mode="Markdown")
+        await message.answer(text, reply_markup=kb.as_markup(), parse_mode="HTML")
 
 
 @router.callback_query(F.data.startswith("review_"))
@@ -578,7 +578,7 @@ async def cb_menu_metrics(callback: types.CallbackQuery) -> None:
     for k, v in report.items():
         lines.append(f"• {escape_md(k)}: {escape_md(str(v))}")
     await callback.message.edit_text(
-        "\n".join(lines), parse_mode="MarkdownV2", reply_markup=menus.back_button()
+        "\n".join(lines), parse_mode="HTML", reply_markup=menus.back_button()
     )
     await callback.answer()
 
@@ -597,8 +597,8 @@ async def cmd_promote(message: types.Message, session: AsyncSession) -> None:
 
     if not message.reply_to_message or not message.reply_to_message.from_user:
         await message.answer(
-            "⚠️ Reply to a user's message to promote them.\nUsage: `/promote <role>`",
-            parse_mode="Markdown",
+            "⚠️ Reply to a user's message to promote them.\nUsage: <code>/promote <role></code>",
+            parse_mode="HTML",
         )
         return
 
@@ -647,7 +647,7 @@ async def cmd_promote(message: types.Message, session: AsyncSession) -> None:
         details=f"promoted={target_user.id} role={role}",
     )
     await message.answer(
-        f"✅ User {target_user.full_name} has been promoted to `{role}`.", parse_mode="Markdown"
+        f"✅ User {target_user.full_name} has been promoted to <code>{role}</code>.", parse_mode="HTML"
     )
 
 
@@ -687,7 +687,7 @@ async def cmd_demote(message: types.Message, session: AsyncSession) -> None:
             details=f"demoted={target_user.id}",
         )
         await message.answer(
-            f"✅ User {target_user.full_name} has been demoted to `student`.", parse_mode="Markdown"
+            f"✅ User {target_user.full_name} has been demoted to <code>student</code>.", parse_mode="HTML"
         )
     else:
         await message.answer(f"⚠️ User {target_user.full_name} is already a student/unregistered.")
@@ -714,9 +714,9 @@ async def cmd_sync_admin(message: types.Message, session: AsyncSession) -> None:
         )
         group = await crud.create(session, group)
         await message.answer(
-            f"📋 Group registered (chat\_id: `{message.chat.id}`)\n"
-            f"Use `/menu` in my DMs to configure department, year, and section.",
-            parse_mode="Markdown",
+            f"📋 Group registered (chat_id: <code>{message.chat.id}</code>)\n"
+            f"Use <code>/menu</code> in my DMs to configure department, year, and section.",
+            parse_mode="HTML",
         )
 
     role = "owner" if chat_member.status == "creator" else "dept_admin"
@@ -726,9 +726,9 @@ async def cmd_sync_admin(message: types.Message, session: AsyncSession) -> None:
     if existing:
         if existing.role in ("student", "moderator", "representative"):
             await crud.update_fields(session, User, existing.id, role=role)
-            await message.answer(f"✅ Your role has been updated to `{role}`.", parse_mode="Markdown")
+            await message.answer(f"✅ Your role has been updated to <code>{role}</code>.", parse_mode="HTML")
         else:
-            await message.answer(f"✅ You are already synced as `{existing.role}`.", parse_mode="Markdown")
+            await message.answer(f"✅ You are already synced as <code>{existing.role}</code>.", parse_mode="HTML")
     else:
         await crud.create(
             session,
@@ -740,7 +740,7 @@ async def cmd_sync_admin(message: types.Message, session: AsyncSession) -> None:
                 full_name=message.from_user.full_name,
             ),
         )
-        await message.answer(f"✅ Registered as `{role}`! Use `/menu` in my DMs to manage this group.", parse_mode="Markdown")
+        await message.answer(f"✅ Registered as <code>{role}</code>! Use <code>/menu</code> in my DMs to manage this group.", parse_mode="HTML")
 
     # Also register the current topic if typed from a thread
     if message.message_thread_id:
@@ -756,7 +756,7 @@ async def cmd_sync_admin(message: types.Message, session: AsyncSession) -> None:
                 status="active",
             )
             await crud.create(session, new_topic)
-            await message.answer("📌 This topic has been registered too!", parse_mode="Markdown")
+            await message.answer("📌 This topic has been registered too!", parse_mode="HTML")
 
 
 @router.message(Command("scan_topics"), StateFilter(any_state))
@@ -771,7 +771,7 @@ async def cmd_scan_topics(message: types.Message, state: FSMContext, session: As
 
     group = await crud.get_group_by_chat_id(session, message.chat.id)
     if not group:
-        await message.answer("❌ This group is not registered. Type `/sync_admin` first.", parse_mode="Markdown")
+        await message.answer("❌ This group is not registered. Type <code>/sync_admin</code> first.", parse_mode="HTML")
         return
 
     thread_id = message.message_thread_id
@@ -796,9 +796,9 @@ async def cmd_scan_topics(message: types.Message, state: FSMContext, session: As
     existing = await crud.get_topic(session, message.chat.id, thread_id)
     if existing:
         await message.answer(
-            f"✅ This topic is already registered as `{existing.topic_name}`.\n"
-            f"_(Tip: You can rename it by typing `/scan_topics Your Custom Name`)_",
-            parse_mode="Markdown"
+            f"✅ This topic is already registered as <code>{existing.topic_name}</code>.\n"
+            f"_(Tip: You can rename it by typing <code>/scan_topics Your Custom Name</code>)_",
+            parse_mode="HTML"
         )
         return
 
@@ -815,11 +815,11 @@ async def cmd_scan_topics(message: types.Message, state: FSMContext, session: As
     )
     await crud.create(session, new_topic)
     
-    msg = f"✅ Topic registered as `{topic_name}`!\nYou can now link it to a course via Add Course in `/menu`."
+    msg = f"✅ Topic registered as <code>{topic_name}</code>!\nYou can now link it to a course via Add Course in <code>/menu</code>."
     if len(args) == 1:
-        msg += "\n\n_(Tip: In the future, you can instantly name it by typing `/scan_topics Your Topic Name`)_"
+        msg += "\n\n_(Tip: In the future, you can instantly name it by typing <code>/scan_topics Your Topic Name</code>)_"
         
-    await message.answer(msg, parse_mode="Markdown")
+    await message.answer(msg, parse_mode="HTML")
 
 
 @router.callback_query(F.data == "menu:audit")
@@ -858,13 +858,13 @@ async def cb_view_audit(callback: types.CallbackQuery, session: AsyncSession) ->
                 "No audit logs found.", reply_markup=menus.back_button()
             )
             return
-        lines = [f"📝 *Audit Logs for {escape_md(group.department or 'Group')}*"]
+        lines = [f"📝 <b>Audit Logs for {escape_md(group.department or 'Group')}</b>"]
         for log in logs:
             time_str = escape_md(log.timestamp.strftime("%Y-%m-%d %H:%M"))
             action = escape_md(log.action)
-            lines.append(f"• `{time_str}`: {action}")
+            lines.append(f"• <code>{time_str}</code>: {action}")
         await callback.message.edit_text(
-            "\n".join(lines), parse_mode="MarkdownV2", reply_markup=menus.back_button()
+            "\n".join(lines), parse_mode="HTML", reply_markup=menus.back_button()
         )
     await callback.answer()
 
@@ -896,8 +896,8 @@ async def cb_set_safety(callback: types.CallbackQuery, session: AsyncSession) ->
             await crud.update_fields(session, Group, group.id, ai_moderation_enabled=new_status)
             status_str = "ON 🛡️" if new_status else "OFF ⚠️"
             await callback.message.edit_text(
-                f"AI Safety Filter for **{escape_md(group.department or 'Group')}** is now {status_str}\\.",
-                parse_mode="MarkdownV2",
+                f"AI Safety Filter for **{escape_md(group.department or 'Group')}** is now {status_str}\.",
+                parse_mode="HTML",
                 reply_markup=menus.back_button(),
             )
         else:
@@ -908,8 +908,8 @@ async def cb_set_safety(callback: types.CallbackQuery, session: AsyncSession) ->
 @router.callback_query(F.data == "menu:cmd_version")
 async def cb_menu_version(callback: types.CallbackQuery) -> None:
     text = (
-        "🚀 *Academic Assistant Bot v1\\.1\\.0*\n\n"
-        "*Recent Updates:*\n"
+        "🚀 <b>Academic Assistant Bot v1\.1\.0</b>\n\n"
+        "<b>Recent Updates:</b>\n"
         "• OCR Image Extraction\n"
         "• Document Extraction \\(PDF/DOCX\\)\n"
         "• Voice Note Transcription\n"
@@ -917,6 +917,6 @@ async def cb_menu_version(callback: types.CallbackQuery) -> None:
         "• Advanced Role Management & Audit Logs"
     )
     await callback.message.edit_text(
-        text, parse_mode="MarkdownV2", reply_markup=menus.back_button()
+        text, parse_mode="HTML", reply_markup=menus.back_button()
     )
     await callback.answer()

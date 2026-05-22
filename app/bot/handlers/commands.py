@@ -30,17 +30,17 @@ async def cmd_start(message: types.Message, state: FSMContext, session: AsyncSes
 
     if is_admin:
         text = (
-            f"👋 Welcome, *{name}*\\!\n\n"
-            "You have admin access\\. Use the menu below to manage your groups\\."
+            f"👋 Welcome, *{name}*\!\n\n"
+            "You have admin access\. Use the menu below to manage your groups\."
         )
         await message.answer(text, reply_markup=menus.main_menu())
     else:
         text = (
-            f"👋 Hi, *{name}*\\!\n\n"
-            "I'm the Academic Assistant Bot\\. "
+            f"👋 Hi, *{name}*\!\n\n"
+            "I'm the Academic Assistant Bot\. "
             "I help manage course information, assignments, and reminders "
-            "in your university group\\.\n\n"
-            "If you're a group admin, add me to your group and use /menu here to configure\\."
+            "in your university group\.\n\n"
+            "If you're a group admin, add me to your group and use /menu here to configure\."
         )
         await message.answer(text)
 
@@ -51,13 +51,13 @@ async def cmd_help(message: types.Message, state: FSMContext) -> None:
     """Show available commands."""
     await state.clear()
     text = (
-        "*Available Commands*\n\n"
-        "`/start` — Start the bot\n"
-        "`/help` — Show this message\n"
-        "`/menu` — Open admin menu \\(DM only\\)\n"
-        "`/status` — Show group info\n"
-        "`/ask` — Ask the AI a question\n"
-        "`/sync_admin` — Sync your admin role \\(in group\\)"
+        "<b>Available Commands</b>\n\n"
+        "<code>/start</code> — Start the bot\n"
+        "<code>/help</code> — Show this message\n"
+        "<code>/menu</code> — Open admin menu \\(DM only\\)\n"
+        "<code>/status</code> — Show group info\n"
+        "<code>/ask</code> — Ask the AI a question\n"
+        "<code>/sync_admin</code> — Sync your admin role \\(in group\\)"
     )
     await message.answer(text)
 
@@ -73,15 +73,15 @@ async def cmd_menu(message: types.Message, state: FSMContext, session: AsyncSess
         managed = await crud.get_managed_groups(session, message.from_user.id)
         group_names = ", ".join([escape_md(g.department) for g in managed if g.department]) or "None"
         await message.answer(
-            f"⚙️ *Admin Menu*\n_Managing groups:_ {group_names}",
+            f"⚙️ <b>Admin Menu</b>\n_Managing groups:_ {group_names}",
             reply_markup=menus.main_menu(),
         )
     else:
         text = (
-            "⚠️ You don't have admin access to any registered active groups\\.\n\n"
-            "If you are simply a student reading announcements, you don't need this menu\\!\n\n"
-            "If you are a Telegram administrator in a registered group, go to that group and type `/sync_admin` first\\.\n\n"
-            "If you just added me to a *new* group and want to become the Owner to manage it, click below to set it up:"
+            "⚠️ You don't have admin access to any registered active groups\.\n\n"
+            "If you are simply a student reading announcements, you don't need this menu\!\n\n"
+            "If you are a Telegram administrator in a registered group, go to that group and type <code>/sync_admin</code> first\.\n\n"
+            "If you just added me to a <b>new</b> group and want to become the Owner to manage it, click below to set it up:"
         )
         await message.answer(text, reply_markup=menus.unregistered_menu())
 
@@ -95,20 +95,20 @@ async def cmd_status(message: types.Message, state: FSMContext, session: AsyncSe
     group = await crud.get_group_by_chat_id(session, chat_id)
 
     if not group:
-        await message.answer("❓ This group is not registered\\. Ask an admin to set it up\\.")
+        await message.answer("❓ This group is not registered\. Ask an admin to set it up\.")
         return
 
     courses = await crud.get_active_courses(session, group.id)
     course_list = ", ".join(escape_md(c.course_name) for c in courses) or "None"
 
     text = (
-        f"📊 *Group Status*\n\n"
-        f"`Department` {escape_md(group.department or 'Not set')}\n"
-        f"`Year` {group.year or 'Not set'}\n"
-        f"`Section` {escape_md(group.section or 'Not set')}\n"
-        f"`Semester` {group.semester or 'Not set'}\n"
-        f"`Courses` {course_list}\n"
-        f"`Active` {'Yes' if group.active else 'No'}"
+        f"📊 <b>Group Status</b>\n\n"
+        f"<code>Department</code> {escape_md(group.department or 'Not set')}\n"
+        f"<code>Year</code> {group.year or 'Not set'}\n"
+        f"<code>Section</code> {escape_md(group.section or 'Not set')}\n"
+        f"<code>Semester</code> {group.semester or 'Not set'}\n"
+        f"<code>Courses</code> {course_list}\n"
+        f"<code>Active</code> {'Yes' if group.active else 'No'}"
     )
     await message.answer(text)
 
@@ -117,7 +117,7 @@ async def cmd_status(message: types.Message, state: FSMContext, session: AsyncSe
 @router.callback_query(F.data == "menu:main")
 async def cb_main_menu(callback: types.CallbackQuery) -> None:
     """Return to main admin menu."""
-    await callback.message.edit_text("⚙️ *Admin Menu*", reply_markup=menus.main_menu())
+    await callback.message.edit_text("⚙️ <b>Admin Menu</b>", reply_markup=menus.main_menu())
     await callback.answer()
 
 
@@ -127,7 +127,7 @@ async def cb_cancel(callback: types.CallbackQuery, state: FSMContext) -> None:
     """Cancel any active FSM flow."""
     await state.clear()
     await callback.message.edit_text(
-        "❌ Cancelled\\. Use /menu to start again\\.",
+        "❌ Cancelled\. Use /menu to start again\.",
         reply_markup=menus.back_button(),
     )
     await callback.answer()
@@ -176,7 +176,7 @@ async def cmd_ask_with_file(message: types.Message, state: FSMContext, bot: Bot)
         return
 
     # Size guard (5MB max)
-    if doc.file_size and doc.file_size > 5 * 1024 * 1024:
+    if doc.file_size and doc.file_size > 5 <b> 1024 </b> 1024:
         await message.answer("File too large (max 5MB).", parse_mode=None)
         return
 

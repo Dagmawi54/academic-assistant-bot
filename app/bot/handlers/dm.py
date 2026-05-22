@@ -32,7 +32,7 @@ async def chat_with_bot(message: types.Message, bot: Bot) -> None:
             )
             return
 
-        if doc.file_size and doc.file_size > 5 * 1024 * 1024:
+        if doc.file_size and doc.file_size > 5 <b> 1024 </b> 1024:
             await message.answer("File too large (max 5MB).", parse_mode=None)
             return
 

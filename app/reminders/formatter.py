@@ -14,24 +14,24 @@ def format_reminder(item: AcademicItem) -> str:
     """
     # Title
     title = escape_md(item.title or f"{item.item_type.title()}")
-    lines = [f"*{title} — Reminder*"]
+    lines = [f"<b>{title} — Reminder</b>"]
     lines.append("")
 
     # Deadline
     if item.deadline:
-        lines.append(f"`Deadline`")
+        lines.append(f"<code>Deadline</code>")
         lines.append(f"{escape_md(format_datetime(item.deadline))} \\(Addis Ababa Time\\)")
         lines.append("")
 
     # Room
     if item.room:
-        lines.append(f"`Room`")
+        lines.append(f"<code>Room</code>")
         lines.append(escape_md(item.room))
         lines.append("")
 
     # Coverage
     if item.coverage:
-        lines.append(f"`Coverage`")
+        lines.append(f"<code>Coverage</code>")
         lines.append(escape_md(item.coverage))
         lines.append("")
 
@@ -58,25 +58,25 @@ def format_academic_notification(
     label = type_labels.get(classification.message_type, "📌 Update")
     title = escape_md(classification.title or classification.message_type.replace("_", " ").title())
 
-    lines = [f"*{escape_md(label)}*"]
+    lines = [f"<b>{escape_md(label)}</b>"]
     lines.append(f"_{title}_")
     lines.append("")
 
     if classification.deadline:
-        lines.append(f"`Deadline`")
+        lines.append(f"<code>Deadline</code>")
         lines.append(f"{escape_md(format_datetime(classification.deadline))}")
         lines.append("")
 
     if classification.room:
-        lines.append(f"`Room` {escape_md(classification.room)}")
+        lines.append(f"<code>Room</code> {escape_md(classification.room)}")
         lines.append("")
 
     if classification.coverage:
-        lines.append(f"`Coverage`")
+        lines.append(f"<code>Coverage</code>")
         lines.append(escape_md(classification.coverage))
         lines.append("")
 
     if classification.course_hint:
-        lines.append(f"`Course` {escape_md(classification.course_hint)}")
+        lines.append(f"<code>Course</code> {escape_md(classification.course_hint)}")
 
     return "\n".join(lines)

@@ -7,7 +7,7 @@ uvicorn[standard]>=0.27.0
 sqlalchemy[asyncio]>=2.0.25
 alembic>=1.13.0
 aiosqlite>=0.19.0
-# asyncpg>=0.29.0  # Uncomment for PostgreSQL production
+asyncpg>=0.29.0
 # Scheduling
 apscheduler>=3.10.4
 # Cache / Queue

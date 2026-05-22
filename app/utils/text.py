@@ -6,7 +6,7 @@ import re
 # Telegram MarkdownV2 escaping
 # ---------------------------------------------------------------------------
 
-_MARKDOWNV2_SPECIAL = re.compile(r"([_*\[\]()~`>#+\-=|{}.!\\])")
+_MARKDOWNV2_SPECIAL = re.compile(r"([_*\[\]()~`>#+-=|{}.!\\])")
 
 
 def escape_md(text: str) -> str:
