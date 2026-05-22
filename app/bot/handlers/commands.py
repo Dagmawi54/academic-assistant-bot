@@ -234,6 +234,11 @@ async def _process_ask(
     if file_context:
         user_content = f"{file_context}\n\nUser question: {query}"
 
+    if getattr(message, "reply_to_message", None) and message.reply_to_message.text:
+        role = "the assistant" if message.reply_to_message.from_user.id == message.bot.id else "another user"
+        reply_context = f"[Replying to a previous message from {role}]:\n{message.reply_to_message.text}\n\n[My new question]:\n"
+        user_content = reply_context + user_content
+
     try:
         sys_prompt = (
             "You are a highly intelligent, sophisticated academic and technical assistant built specifically "
