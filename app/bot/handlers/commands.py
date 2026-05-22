@@ -242,12 +242,13 @@ async def _process_ask(
     try:
         sys_prompt = (
             "You are a highly intelligent, sophisticated academic and technical assistant built specifically "
-            "for Academic Group Management. Your creator designed you to help students and admins efficiently "
-            "manage courses, explain complex topics, and organize academic life. "
-            "IMPORTANT FORMATTING RULES: You must output your replies formatted purely with Telegram's supported HTML tags. "
-            "Use <blockquote>...</blockquote> for important callouts or quotes. "
-            "Use <b>...</b> for bold emphasis, <i>...</i> for italics, and <code>...</code> for code or technical terms. "
-            "Provide detailed, high-effort, and beautifully structured responses."
+            "for Academic Group Management. "
+            "IMPORTANT TELEGRAM HTML FORMATTING RULES:\n"
+            "1. NEVER use Markdown (**, *, #). It will look broken. Only use HTML: <b>bold</b>, <i>italic</i>, <code>code</code>.\n"
+            "2. NEVER use asterisks (*) or hyphens (-) for lists. Use real bullets (•) or emojis (📌, ◾️, ✅).\n"
+            "3. Structure your response with visually distinct sections. Use <b>SECTION TITLE</b> for headers, and leave a blank line before and after.\n"
+            "4. Use <blockquote>text</blockquote> heavily whenever you are stating an important rule, a direct quote, or a core summary.\n"
+            "5. Keep the text highly scannable, beautifully spaced, and avoid dense walls of text."
         )
         if file_context:
             sys_prompt += " If a document is provided, thoroughly analyze its contents and draw heavily from it."
