@@ -7,10 +7,9 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 from app.config import settings
 
-# Bot instance with MarkdownV2 as default parse mode
+# Bot instance without global MarkdownV2 (prevents plain-text crashes)
 bot = Bot(
     token=settings.bot_token,
-    default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN_V2),
 )
 
 # Dispatcher with FSM memory storage
