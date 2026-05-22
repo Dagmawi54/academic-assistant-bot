@@ -133,34 +133,116 @@ async def cb_cancel(callback: types.CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
 
 
-# ---------- /ask ----------
-@router.message(Command("ask"), StateFilter(any_state))
+# ---------- /ask (text-only) ----------
+@router.message(Command("ask"), StateFilter(any_state), F.document == None)
 async def cmd_ask(message: types.Message, state: FSMContext) -> None:
-    """Ask the AI a technical or general question."""
+    """Ask the AI a text-only question."""
     await state.clear()
     args = message.text.split(maxsplit=1)
     if len(args) < 2:
         await message.answer(
-            "Please provide a question after the command, e.g. /ask What is python?",
+            "Please provide a question after the command.\n"
+            "Examples:\n"
+            "  /ask What is python?\n"
+            "  Or attach a DOCX/PDF file with /ask as the caption!",
             parse_mode=None,
         )
         return
 
     query = args[1].strip()
+    await _process_ask(message, query, file_context=None)
 
-    from app.ai.groq_client import groq_client
 
-    # Send temporary processing message (plain text to avoid MarkdownV2 crash)
-    status_msg = await message.answer("⏳ Thinking...", parse_mode=None)
+# ---------- /ask (with document) ----------
+@router.message(Command("ask"), StateFilter(any_state), F.document != None)
+async def cmd_ask_with_file(message: types.Message, state: FSMContext, bot: Bot) -> None:
+    """Ask the AI a question about an attached document."""
+    await state.clear()
+    
+    # Extract question from caption
+    caption = message.caption or ""
+    args = caption.split(maxsplit=1)
+    query = args[1].strip() if len(args) >= 2 else "Summarize and analyze this document."
+
+    doc = message.document
+    file_name = doc.file_name or "unknown"
+    ext = file_name.rsplit(".", 1)[-1].lower() if "." in file_name else ""
+
+    if ext not in ("pdf", "docx", "doc", "txt"):
+        await message.answer(
+            f"I can analyze PDF, DOCX, and TXT files. Got: .{ext}",
+            parse_mode=None,
+        )
+        return
+
+    # Size guard (5MB max)
+    if doc.file_size and doc.file_size > 5 * 1024 * 1024:
+        await message.answer("File too large (max 5MB).", parse_mode=None)
+        return
+
+    status_msg = await message.answer(f"📄 Reading {file_name}...", parse_mode=None)
 
     try:
-        # Try Groq first for speed
+        file = await bot.download(doc)
+        file_bytes = file.read()
+
+        from app.files.parser import extract_text_from_pdf, extract_text_from_docx
+
+        extracted = None
+        if ext == "pdf":
+            extracted = await extract_text_from_pdf(file_bytes)
+        elif ext in ("docx", "doc"):
+            extracted = await extract_text_from_docx(file_bytes)
+        elif ext == "txt":
+            extracted = file_bytes.decode("utf-8", errors="replace")
+
+        if not extracted or not extracted.strip():
+            await status_msg.edit_text(
+                "Could not extract any text from this file. It might be image-based or empty.",
+                parse_mode=None,
+            )
+            return
+
+        # Truncate extracted text to keep within token limits
+        if len(extracted) > 8000:
+            extracted = extracted[:8000] + "\n\n... (document truncated)"
+
+        await status_msg.edit_text("⏳ Analyzing document...", parse_mode=None)
+        file_context = f"--- DOCUMENT: {file_name} ---\n{extracted}\n--- END DOCUMENT ---"
+        await _process_ask(message, query, file_context=file_context, status_msg=status_msg)
+
+    except Exception as e:
+        try:
+            await status_msg.edit_text(f"Error reading file: {str(e)[:200]}", parse_mode=None)
+        except Exception:
+            pass
+
+
+async def _process_ask(
+    message: types.Message,
+    query: str,
+    file_context: str | None = None,
+    status_msg: types.Message | None = None,
+) -> None:
+    """Shared AI query logic for text-only and file-attached /ask."""
+    from app.ai.groq_client import groq_client
+
+    if not status_msg:
+        status_msg = await message.answer("⏳ Thinking...", parse_mode=None)
+
+    user_content = query
+    if file_context:
+        user_content = f"{file_context}\n\nUser question: {query}"
+
+    try:
         messages = [
             {
                 "role": "system",
-                "content": "You are a helpful academic and technical AI assistant. Keep responses reasonably concise.",
+                "content": "You are a helpful academic and technical AI assistant. "
+                           "If a document is provided, base your answer on its contents. "
+                           "Keep responses reasonably concise.",
             },
-            {"role": "user", "content": query},
+            {"role": "user", "content": user_content},
         ]
         result = await groq_client.complete(messages)
 
@@ -175,7 +257,9 @@ async def cmd_ask(message: types.Message, state: FSMContext) -> None:
 
                 if gemini_client.is_configured:
                     gem_result = await gemini_client.complete(
-                        "You are a helpful academic and technical AI assistant.", query
+                        "You are a helpful academic and technical AI assistant. "
+                        "If a document is provided, base your answer on its contents.",
+                        user_content,
                     )
                     if gem_result:
                         answer_text = gem_result.get("raw") or None
@@ -183,13 +267,11 @@ async def cmd_ask(message: types.Message, state: FSMContext) -> None:
                 pass
 
         if answer_text:
-            # Truncate if too long for Telegram (4096 char limit)
             if len(answer_text) > 4000:
                 answer_text = answer_text[:4000] + "\n\n... (truncated)"
             try:
                 await status_msg.edit_text(answer_text, parse_mode="Markdown")
             except Exception:
-                # If Markdown parsing fails, send as plain text
                 try:
                     await status_msg.edit_text(answer_text, parse_mode=None)
                 except Exception:
@@ -205,3 +287,4 @@ async def cmd_ask(message: types.Message, state: FSMContext) -> None:
             await status_msg.edit_text(f"Error: {str(e)[:200]}", parse_mode=None)
         except Exception:
             pass
+

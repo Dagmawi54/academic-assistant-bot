@@ -795,29 +795,31 @@ async def cmd_scan_topics(message: types.Message, state: FSMContext, session: As
     from app.database.models import Topic
     existing = await crud.get_topic(session, message.chat.id, thread_id)
     if existing:
-        await message.answer(f"✅ This topic is already registered as `{existing.topic_name}`.", parse_mode="Markdown")
+        await message.answer(
+            f"✅ This topic is already registered as `{existing.topic_name}`.\n"
+            f"_(Tip: You can rename it by typing `/scan_topics Your Custom Name`)_",
+            parse_mode="Markdown"
+        )
         return
 
-    # Try to get topic name from chat or command args
-    topic_name = f"Topic {thread_id}"
     args = message.text.split(maxsplit=1)
-    if len(args) > 1:
-        topic_name = args[1].strip()
-        
+    topic_name = args[1].strip() if len(args) > 1 else f"Topic {thread_id}"
+
     new_topic = Topic(
         group_id=group.id,
         chat_id=message.chat.id,
         message_thread_id=thread_id,
         topic_name=topic_name,
-        topic_type="ignored",
-        status="active",
+        topic_type="course",
+        status="active"
     )
     await crud.create(session, new_topic)
-    await message.answer(
-        f"✅ Topic registered as `{topic_name}`!\n"
-        f"You can now link it to a course via Add Course in `/menu`.",
-        parse_mode="Markdown",
-    )
+    
+    msg = f"✅ Topic registered as `{topic_name}`!\nYou can now link it to a course via Add Course in `/menu`."
+    if len(args) == 1:
+        msg += "\n\n_(Tip: In the future, you can instantly name it by typing `/scan_topics Your Topic Name`)_"
+        
+    await message.answer(msg, parse_mode="Markdown")
 
 
 @router.callback_query(F.data == "menu:audit")
