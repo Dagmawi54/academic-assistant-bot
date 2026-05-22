@@ -7,9 +7,9 @@ services:
     healthCheckPath: /health
     envVars:
       - key: DATABASE_URL
-        value: sqlite+aiosqlite:////tmp/bot.db
+        sync: false # Set this to your Neon connection string in the Render UI
       - key: USE_POLLING
-        value: "True"
+        value: "True" # Switch to False once WEBHOOK_URL is set
       # These must be set securely in the Render Dashboard
       - key: BOT_TOKEN
         sync: false
