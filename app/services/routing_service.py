@@ -45,12 +45,14 @@ async def process_group_message(
         course=classification.course_hint,
     )
 
-    # Skip non-academic messages
+    # Skip non-academic messages (DISCUSSION or UNKNOWN)
     if classification.message_type in ("DISCUSSION", "UNKNOWN"):
-        if classification.confidence > 0.5:
-            return  # Clearly not academic
+        # If the rule-based engine is reasonably sure it's just chat, 
+        # or if the message is very short, do NOT call the expensive AI.
+        if classification.confidence >= 0.5 or len(text.split()) < 3:
+            return  # Clearly not academic or too short to be meaningful
 
-        # Low confidence — try AI if available
+        # Only trial AI for high-importance messages that might have been missed
         ai_result = await _try_ai_extraction(text)
         if ai_result and ai_result.get("type") not in (
             "discussion",

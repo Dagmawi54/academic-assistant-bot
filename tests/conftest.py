@@ -15,13 +15,17 @@ TestSessionFactory = async_sessionmaker(engine, class_=AsyncSession, expire_on_c
 
 
 @pytest_asyncio.fixture(autouse=True)
-async def setup_db():
+async def setup_db(monkeypatch):
     """Create all tables before each test, drop after."""
+    # Redirect global session factory to use our test engine
+    monkeypatch.setattr("app.database.session.async_session_factory", TestSessionFactory)
+    
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
+
 
 
 @pytest_asyncio.fixture

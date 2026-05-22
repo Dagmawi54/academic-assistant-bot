@@ -1,7 +1,8 @@
 import pytest
 from app.database import crud
-from app.database.models import Group, Topic, Course, User
+from app.database.models import Group, Topic, Course, User, AcademicItem, Reminder
 from app.services.semester_service import close_semester, activate_semester
+
 
 @pytest.mark.asyncio
 async def test_group_registration(session):
@@ -79,3 +80,58 @@ async def test_semester_lifecycle(session):
     await activate_semester(session, group.id, 2)
     updated_group = await crud.get_by_id(session, Group, group.id)
     assert updated_group.semester == 2
+
+@pytest.mark.asyncio
+async def test_reminder_generation_logic(session):
+    """Test that creating an AcademicItem triggers reminder records in DB."""
+    from app.services.reminder_service import create_reminders_for_item
+    from datetime import timedelta
+    from app.utils.timezone import now_addis
+    from tests.conftest import TestSessionFactory
+
+    deadline = now_addis() + timedelta(days=5)
+
+    # Create group + item in a committed transaction so the service can see them
+    async with TestSessionFactory() as setup_session:
+        async with setup_session.begin():
+            group = Group(chat_id=-1, active=True)
+            setup_session.add(group)
+            await setup_session.flush()
+
+            item = AcademicItem(
+                group_id=group.id,
+                item_type="assignment",
+                title="Test Task",
+                deadline=deadline,
+                source_chat_id=-1,
+                status="active"
+            )
+            setup_session.add(item)
+            await setup_session.flush()
+            item_id = item.id
+
+    # Call the service (opens its own session internally)
+    await create_reminders_for_item(item_id)
+
+    # Verify reminders were created
+    async with TestSessionFactory() as check_session:
+        reminders = await crud.get_all(check_session, Reminder, item_id=item_id)
+        assert len(reminders) >= 1, f"Expected reminders, got {len(reminders)}"
+        for r in reminders:
+            assert r.sent is False
+            assert r.cancelled is False
+
+
+@pytest.mark.asyncio
+async def test_classifier_discussion_filter():
+    """Test that casual chat is classified as DISCUSSION."""
+    from app.routing.classifier import classify
+
+    result = classify("hey guys what's up, anyone going to lunch?")
+    assert result.message_type == "DISCUSSION"
+    assert result.confidence >= 0.3
+
+    result2 = classify("Database assignment due tomorrow, submit on LMS!")
+    assert result2.message_type == "ASSIGNMENT"
+    assert result2.confidence >= 0.5
+
