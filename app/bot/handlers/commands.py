@@ -235,13 +235,20 @@ async def _process_ask(
         user_content = f"{file_context}\n\nUser question: {query}"
 
     try:
+        sys_prompt = (
+            "You are a highly intelligent, sophisticated academic and technical assistant built specifically "
+            "for Academic Group Management. Your creator designed you to help students and admins efficiently "
+            "manage courses, explain complex topics, and organize academic life. "
+            "IMPORTANT FORMATTING RULES: You must output your replies formatted purely with Telegram's supported HTML tags. "
+            "Use <blockquote>...</blockquote> for important callouts or quotes. "
+            "Use <b>...</b> for bold emphasis, <i>...</i> for italics, and <code>...</code> for code or technical terms. "
+            "Provide detailed, high-effort, and beautifully structured responses."
+        )
+        if file_context:
+            sys_prompt += " If a document is provided, thoroughly analyze its contents and draw heavily from it."
+
         messages = [
-            {
-                "role": "system",
-                "content": "You are a helpful academic and technical AI assistant. "
-                           "If a document is provided, base your answer on its contents. "
-                           "Keep responses reasonably concise.",
-            },
+            {"role": "system", "content": sys_prompt},
             {"role": "user", "content": user_content},
         ]
         result = await groq_client.complete(messages)
@@ -256,11 +263,7 @@ async def _process_ask(
                 from app.ai.gemini_client import gemini_client
 
                 if gemini_client.is_configured:
-                    gem_result = await gemini_client.complete(
-                        "You are a helpful academic and technical AI assistant. "
-                        "If a document is provided, base your answer on its contents.",
-                        user_content,
-                    )
+                    gem_result = await gemini_client.complete(sys_prompt, user_content)
                     if gem_result:
                         answer_text = gem_result.get("raw") or None
             except Exception:
@@ -270,7 +273,7 @@ async def _process_ask(
             if len(answer_text) > 4000:
                 answer_text = answer_text[:4000] + "\n\n... (truncated)"
             try:
-                await status_msg.edit_text(answer_text, parse_mode="Markdown")
+                await status_msg.edit_text(answer_text, parse_mode="HTML")
             except Exception:
                 try:
                     await status_msg.edit_text(answer_text, parse_mode=None)
