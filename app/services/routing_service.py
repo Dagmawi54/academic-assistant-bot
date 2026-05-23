@@ -99,7 +99,26 @@ async def process_group_message(
         if duplicate:
             await tracker.record_duplicate_check(suppressed=True)
             logger.info("skipped_duplicate_item", duplicate_id=duplicate.id)
+            
+            from app.database.models import DuplicateLog
+            duplicate_log = DuplicateLog(
+                group_id=group.id,
+                existing_item_id=duplicate.id,
+                source_message_id=message_id,
+                reason="Semantic duplicate (similar title within 48h)",
+                raw_text=text
+            )
+            await crud.create(session, duplicate_log)
             return
+
+        chat_link = None
+        if chat_id and message_id:
+            # construct telegram internal link if supergroup
+            base_chat_id = str(chat_id).replace("-100", "")
+            if thread_id:
+                chat_link = f"https://t.me/c/{base_chat_id}/{thread_id}/{message_id}"
+            else:
+                chat_link = f"https://t.me/c/{base_chat_id}/{message_id}"
 
         item = AcademicItem(
             group_id=group.id,
@@ -113,6 +132,7 @@ async def process_group_message(
             confidence=classification.confidence,
             source_message_id=message_id,
             source_chat_id=chat_id,
+            source_message_link=chat_link,
             raw_text=text,
         )
         item = await crud.create(session, item)

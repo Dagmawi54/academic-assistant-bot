@@ -27,7 +27,11 @@ Respond with JSON:
     "course": "course name or null",
     "deadline": "ISO 8601 datetime or null",
     "room": "room/venue or null",
-    "coverage": "chapters/topics covered or null",
+    "coverage": {{
+        "includes": ["topics/chapters to study"],
+        "excludes": ["topics/chapters explicitly excluded"],
+        "raw_statement": "summary of coverage"
+    }} or null,
     "title": "short descriptive title",
     "confidence": 0.0 to 1.0
 }}""",

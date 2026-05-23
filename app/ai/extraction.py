@@ -33,12 +33,27 @@ def parse_extraction(data: dict[str, Any]) -> dict[str, Any]:
         return {}
 
     try:
+        raw_cov = data.get("coverage")
+        coverage_str = None
+        if isinstance(raw_cov, dict):
+            parts = []
+            if raw_cov.get("includes"):
+                parts.append(f"Includes: {', '.join(raw_cov['includes'])}")
+            if raw_cov.get("excludes"):
+                parts.append(f"Excludes: {', '.join(raw_cov['excludes'])}")
+            if not parts and raw_cov.get("raw_statement"):
+                parts.append(raw_cov["raw_statement"])
+            if parts:
+                coverage_str = " | ".join(parts)
+        elif isinstance(raw_cov, str):
+            coverage_str = raw_cov
+
         result: dict[str, Any] = {
             "type": TYPE_MAP.get(data.get("type", "unknown"), "UNKNOWN"),
             "course": data.get("course"),
             "deadline": _parse_datetime(data.get("deadline")),
             "room": data.get("room"),
-            "coverage": data.get("coverage"),
+            "coverage": coverage_str,
             "title": data.get("title"),
             "confidence": float(data.get("confidence", 0.0)),
         }

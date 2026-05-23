@@ -10,6 +10,7 @@ def main_menu() -> InlineKeyboardMarkup:
     """Top-level admin menu."""
     buttons = [
         [InlineKeyboardButton(text="🏢 Infrastructure", callback_data="menu:cat_infrastructure")],
+        [InlineKeyboardButton(text="📋 Events", callback_data="menu:cat_events")],
         [InlineKeyboardButton(text="📢 Communications", callback_data="menu:cat_communications")],
         [InlineKeyboardButton(text="⚙️ Administration", callback_data="menu:cat_administration")],
         [InlineKeyboardButton(text="📊 Analytics & Logs", callback_data="menu:cat_analytics")],
@@ -58,6 +59,18 @@ def cat_analytics() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📝 View Audit Logs", callback_data="menu:audit")],
         [InlineKeyboardButton(text="📊 View System Metrics", callback_data="menu:metrics")],
         [InlineKeyboardButton(text="📦 Version Info", callback_data="menu:cmd_version")],
+        [InlineKeyboardButton(text="⬅️ Back", callback_data="menu:main")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def cat_events() -> InlineKeyboardMarkup:
+    buttons = [
+        [InlineKeyboardButton(text="📅 Upcoming Events", callback_data="menu:events_upcoming")],
+        [InlineKeyboardButton(text="📝 Exam Coverages", callback_data="menu:events_coverage")],
+        [InlineKeyboardButton(text="⏰ Scheduled Reminders", callback_data="menu:events_reminders")],
+        [InlineKeyboardButton(text="⚠️ Low Confidence / Review", callback_data="menu:events_review")],
+        [InlineKeyboardButton(text="🗑️ Suppressed Duplicates", callback_data="menu:events_duplicates")],
         [InlineKeyboardButton(text="⬅️ Back", callback_data="menu:main")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)

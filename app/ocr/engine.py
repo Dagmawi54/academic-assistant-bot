@@ -28,8 +28,6 @@ async def extract_text_from_image(image_bytes: bytes) -> Optional[str]:
     try:
         from app.metrics.tracker import tracker
 
-        await tracker.record_ocr(success=False)  # We will increment success explicitly
-
         text = await loop.run_in_executor(None, _process)
         if text:
             await tracker.record_ocr(success=True)
@@ -37,5 +35,7 @@ async def extract_text_from_image(image_bytes: bytes) -> Optional[str]:
             return text
         return None
     except Exception as e:
+        from app.metrics.tracker import tracker
+        await tracker.record_ocr(success=False)
         logger.exception("ocr_failed", error=type(e).__name__)
         return None

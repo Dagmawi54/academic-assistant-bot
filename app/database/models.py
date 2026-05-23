@@ -116,6 +116,7 @@ class AcademicItem(Base):
     confidence: Mapped[float | None] = mapped_column()
     source_message_id: Mapped[int | None] = mapped_column(BigInteger)
     source_chat_id: Mapped[int | None] = mapped_column(BigInteger)
+    source_message_link: Mapped[str | None] = mapped_column(String(255))
     raw_text: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -181,4 +182,18 @@ class AuditLog(Base):
     chat_id: Mapped[int | None] = mapped_column(BigInteger)
     action: Mapped[str] = mapped_column(String(100), nullable=False)
     details: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class DuplicateLog(Base):
+    """Audit trail for when an academic item is suppressed as a duplicate."""
+
+    __tablename__ = "duplicate_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    group_id: Mapped[int] = mapped_column(Integer, ForeignKey("groups.id"), nullable=False)
+    existing_item_id: Mapped[int] = mapped_column(Integer, ForeignKey("academic_items.id"), nullable=False)
+    source_message_id: Mapped[int | None] = mapped_column(BigInteger)
+    reason: Mapped[str] = mapped_column(String(255))
+    raw_text: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

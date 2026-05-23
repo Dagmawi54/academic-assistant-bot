@@ -50,8 +50,6 @@ async def send_reminder(reminder_id: int) -> None:
             try:
                 from app.metrics.tracker import tracker
 
-                await tracker.record_reminder(success=False)
-
                 await bot.send_message(
                     chat_id=reminder.chat_id,
                     message_thread_id=reminder.thread_id,
@@ -68,6 +66,7 @@ async def send_reminder(reminder_id: int) -> None:
                 )
                 logger.info("reminder_sent", reminder_id=reminder_id, item_id=item.id)
             except Exception:
+                await tracker.record_reminder(success=False)
                 logger.exception("reminder_send_failed", reminder_id=reminder_id)
 
 

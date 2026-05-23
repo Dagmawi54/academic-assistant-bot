@@ -40,6 +40,9 @@ async def init_db() -> None:
             await conn.execute(
                 text("ALTER TABLE groups ADD COLUMN ai_moderation_enabled BOOLEAN DEFAULT FALSE")
             )
+            await conn.execute(
+                text("ALTER TABLE academic_items ADD COLUMN source_message_link VARCHAR(255)")
+            )
     except Exception:
         # Postgres throws if column already exists
         pass

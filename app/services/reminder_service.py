@@ -47,6 +47,15 @@ async def create_reminders_for_item(item_id: int) -> None:
                     send_time=send_time,
                 )
                 session.add(reminder)
+            
+            # Flush to get reminder IDs
+            await session.flush()
+            
+            # Now schedule the active jobs in APScheduler
+            from app.reminders.scheduler import schedule_reminder
+            for r in session.new:
+                if isinstance(r, Reminder):
+                    schedule_reminder(r.id, r.send_time)
 
             logger.info(
                 "reminders_created",
