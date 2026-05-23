@@ -24,9 +24,10 @@ async def _get_admin_group(session: AsyncSession, user_id: int):
 async def cb_cat_events(callback: types.CallbackQuery) -> None:
     """Show the events management menu."""
     await callback.message.edit_text(
-        "📋 <b>Events & Dashboard</b>\n\n"
+        "📋 <b>Events &amp; Dashboard</b>\n\n"
         "View extracted events, upcoming deadlines, exam coverages, and system duplicates.",
-        reply_markup=cat_events()
+        reply_markup=cat_events(),
+        parse_mode="HTML"
     )
 
 
@@ -39,7 +40,11 @@ async def cb_events_upcoming(callback: types.CallbackQuery, session: AsyncSessio
 
     items = await event_service.get_upcoming_events(session, group.id)
     if not items:
-        await callback.message.edit_text("No upcoming events found.", reply_markup=cat_events())
+        await callback.message.edit_text(
+            "📅 <b>Upcoming Events</b>\n\nNo upcoming events found.",
+            reply_markup=cat_events(),
+            parse_mode="HTML"
+        )
         return
 
     text = "📅 <b>Upcoming Events</b>\n\n"
@@ -50,7 +55,7 @@ async def cb_events_upcoming(callback: types.CallbackQuery, session: AsyncSessio
         text += f"• <b>{html.escape(course_name)}</b>: {html.escape(item.title or item.item_type)}\n"
         text += f"  <i>{date_str}</i> {link_str}\n\n"
 
-    await callback.message.edit_text(text, reply_markup=cat_events(), disable_web_page_preview=True)
+    await callback.message.edit_text(text, reply_markup=cat_events(), parse_mode="HTML", disable_web_page_preview=True)
 
 
 @router.callback_query(F.data == "menu:events_reminders", require_role(["owner", "dept_admin", "section_admin", "representative", "moderator"]))
@@ -62,7 +67,11 @@ async def cb_events_reminders(callback: types.CallbackQuery, session: AsyncSessi
 
     reminders = await event_service.get_scheduled_reminders(session, group.id)
     if not reminders:
-        await callback.message.edit_text("No scheduled reminders pending.", reply_markup=cat_events())
+        await callback.message.edit_text(
+            "⏰ <b>Scheduled Reminders</b>\n\nNo scheduled reminders pending.",
+            reply_markup=cat_events(),
+            parse_mode="HTML"
+        )
         return
 
     text = "⏰ <b>Scheduled Reminders</b>\n\n"
@@ -72,7 +81,7 @@ async def cb_events_reminders(callback: types.CallbackQuery, session: AsyncSessi
         text += f"• <b>{r.send_time.strftime('%Y-%m-%d %H:%M')}</b>\n"
         text += f"  <i>{html.escape(course_name)}: {html.escape(item.title or item.item_type)}</i>\n\n"
 
-    await callback.message.edit_text(text, reply_markup=cat_events())
+    await callback.message.edit_text(text, reply_markup=cat_events(), parse_mode="HTML")
 
 
 @router.callback_query(F.data == "menu:events_coverage", require_role(["owner", "dept_admin", "section_admin", "representative", "moderator"]))
@@ -84,7 +93,11 @@ async def cb_events_coverage(callback: types.CallbackQuery, session: AsyncSessio
 
     items = await event_service.get_exam_coverages(session, group.id)
     if not items:
-        await callback.message.edit_text("No exam coverages found.", reply_markup=cat_events())
+        await callback.message.edit_text(
+            "📝 <b>Exam Coverages</b>\n\nNo exam coverages found.",
+            reply_markup=cat_events(),
+            parse_mode="HTML"
+        )
         return
 
     text = "📝 <b>Exam Coverages</b>\n\n"
@@ -97,7 +110,7 @@ async def cb_events_coverage(callback: types.CallbackQuery, session: AsyncSessio
             text += f"  {link_str}\n"
         text += "\n"
 
-    await callback.message.edit_text(text, reply_markup=cat_events(), disable_web_page_preview=True)
+    await callback.message.edit_text(text, reply_markup=cat_events(), parse_mode="HTML", disable_web_page_preview=True)
 
 
 @router.callback_query(F.data == "menu:events_review", require_role(["owner", "dept_admin", "section_admin", "representative", "moderator"]))
@@ -109,7 +122,11 @@ async def cb_events_review(callback: types.CallbackQuery, session: AsyncSession)
 
     items = await event_service.get_low_confidence_items(session, group.id)
     if not items:
-        await callback.message.edit_text("No items currently pending review.", reply_markup=cat_events())
+        await callback.message.edit_text(
+            "⚠️ <b>Low Confidence Extractions</b>\n\nNo items currently pending review.",
+            reply_markup=cat_events(),
+            parse_mode="HTML"
+        )
         return
 
     text = "⚠️ <b>Low Confidence Extractions</b>\n\n"
@@ -120,7 +137,7 @@ async def cb_events_review(callback: types.CallbackQuery, session: AsyncSession)
             text += f"  <a href='{item.source_message_link}'>View Message</a>\n"
         text += "\n"
 
-    await callback.message.edit_text(text, reply_markup=cat_events(), disable_web_page_preview=True)
+    await callback.message.edit_text(text, reply_markup=cat_events(), parse_mode="HTML", disable_web_page_preview=True)
 
 
 @router.callback_query(F.data == "menu:events_duplicates", require_role(["owner", "dept_admin", "section_admin", "representative", "moderator"]))
@@ -132,7 +149,11 @@ async def cb_events_duplicates(callback: types.CallbackQuery, session: AsyncSess
 
     logs = await event_service.get_suppressed_duplicates(session, group.id)
     if not logs:
-        await callback.message.edit_text("No duplicates have been suppressed.", reply_markup=cat_events())
+        await callback.message.edit_text(
+            "🗑️ <b>Suppressed Duplicates</b>\n\nNo duplicates have been suppressed.",
+            reply_markup=cat_events(),
+            parse_mode="HTML"
+        )
         return
 
     text = "🗑️ <b>Suppressed Duplicates</b>\n\n"
@@ -140,4 +161,4 @@ async def cb_events_duplicates(callback: types.CallbackQuery, session: AsyncSess
         text += f"• <b>Original ID {log.existing_item_id}</b>: {html.escape(log.reason)}\n"
         text += f"  <i>{log.created_at.strftime('%Y-%m-%d %H:%M')}</i>\n\n"
 
-    await callback.message.edit_text(text, reply_markup=cat_events())
+    await callback.message.edit_text(text, reply_markup=cat_events(), parse_mode="HTML")
