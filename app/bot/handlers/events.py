@@ -28,6 +28,7 @@ async def cb_cat_events(callback: types.CallbackQuery) -> None:
         reply_markup=cat_events(),
         parse_mode="HTML"
     )
+    await callback.answer()
 
 
 @router.callback_query(F.data == "menu:events_upcoming")
@@ -44,6 +45,7 @@ async def cb_events_upcoming(callback: types.CallbackQuery, session: AsyncSessio
             reply_markup=cat_events(),
             parse_mode="HTML"
         )
+        await callback.answer()
         return
 
     text = "📅 <b>Upcoming Events</b>\n\n"
@@ -55,6 +57,7 @@ async def cb_events_upcoming(callback: types.CallbackQuery, session: AsyncSessio
         text += f"  <i>{date_str}</i> {link_str}\n\n"
 
     await callback.message.edit_text(text, reply_markup=cat_events(), parse_mode="HTML", disable_web_page_preview=True)
+    await callback.answer()
 
 
 @router.callback_query(F.data == "menu:events_reminders")
@@ -71,6 +74,7 @@ async def cb_events_reminders(callback: types.CallbackQuery, session: AsyncSessi
             reply_markup=cat_events(),
             parse_mode="HTML"
         )
+        await callback.answer()
         return
 
     text = "⏰ <b>Scheduled Reminders</b>\n\n"
@@ -81,6 +85,7 @@ async def cb_events_reminders(callback: types.CallbackQuery, session: AsyncSessi
         text += f"  <i>{html.escape(course_name)}: {html.escape(item.title or item.item_type)}</i>\n\n"
 
     await callback.message.edit_text(text, reply_markup=cat_events(), parse_mode="HTML")
+    await callback.answer()
 
 
 @router.callback_query(F.data.in_({"menu:events_coverage", "menu:exam_coverage"}))
@@ -97,6 +102,7 @@ async def cb_events_coverage(callback: types.CallbackQuery, session: AsyncSessio
             reply_markup=cat_events(),
             parse_mode="HTML"
         )
+        await callback.answer()
         return
 
     text = "📝 <b>Exam Coverages</b>\n\n"
@@ -110,6 +116,7 @@ async def cb_events_coverage(callback: types.CallbackQuery, session: AsyncSessio
         text += "\n"
 
     await callback.message.edit_text(text, reply_markup=cat_events(), parse_mode="HTML", disable_web_page_preview=True)
+    await callback.answer()
 
 
 @router.callback_query(F.data == "menu:events_review")
@@ -126,6 +133,7 @@ async def cb_events_review(callback: types.CallbackQuery, session: AsyncSession)
             reply_markup=cat_events(),
             parse_mode="HTML"
         )
+        await callback.answer()
         return
 
     text = "⚠️ <b>Low Confidence Extractions</b>\n\n"
@@ -137,6 +145,7 @@ async def cb_events_review(callback: types.CallbackQuery, session: AsyncSession)
         text += "\n"
 
     await callback.message.edit_text(text, reply_markup=cat_events(), parse_mode="HTML", disable_web_page_preview=True)
+    await callback.answer()
 
 
 @router.callback_query(F.data == "menu:events_duplicates")
@@ -153,6 +162,7 @@ async def cb_events_duplicates(callback: types.CallbackQuery, session: AsyncSess
             reply_markup=cat_events(),
             parse_mode="HTML"
         )
+        await callback.answer()
         return
 
     text = "🗑️ <b>Suppressed Duplicates</b>\n\n"
@@ -161,3 +171,4 @@ async def cb_events_duplicates(callback: types.CallbackQuery, session: AsyncSess
         text += f"  <i>{log.created_at.strftime('%Y-%m-%d %H:%M')}</i>\n\n"
 
     await callback.message.edit_text(text, reply_markup=cat_events(), parse_mode="HTML")
+    await callback.answer()
