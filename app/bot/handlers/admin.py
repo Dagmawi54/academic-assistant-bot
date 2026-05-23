@@ -436,10 +436,10 @@ async def placeholder_menu(callback: types.CallbackQuery) -> None:
 # CATEGORY MENUS
 # =====================================================================
 
-@router.callback_query(F.data == "menu:cat_infrastructure")
+@router.callback_query(F.data.in_({"menu:cat_infrastructure", "menu:cat_courses"}))
 async def cb_cat_infrastructure(callback: types.CallbackQuery) -> None:
     await callback.message.edit_text(
-        "🏢 <b>Infrastructure</b>", reply_markup=menus.cat_infrastructure(), parse_mode="HTML"
+        "📚 <b>Courses</b>", reply_markup=menus.cat_courses(), parse_mode="HTML"
     )
     await callback.answer()
 
@@ -465,8 +465,94 @@ async def cb_cat_administration(callback: types.CallbackQuery) -> None:
 @router.callback_query(F.data == "menu:cat_analytics")
 async def cb_cat_analytics(callback: types.CallbackQuery) -> None:
     await callback.message.edit_text(
-        "📊 <b>Analytics & Logs</b>", reply_markup=menus.cat_analytics(), parse_mode="HTML"
+        "📊 <b>Analytics & Logs</b>\n\nOperational visibility for events, reminders, duplicates, and admin activity.",
+        reply_markup=menus.cat_analytics(),
+        parse_mode="HTML",
     )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "menu:analytics_overview")
+async def cb_menu_analytics_overview(callback: types.CallbackQuery, session: AsyncSession) -> None:
+    from sqlalchemy import func, select
+    from app.database.models import AcademicItem, DuplicateLog, Reminder
+
+    groups = await crud.get_managed_groups(session, callback.from_user.id)
+    if not groups:
+        await callback.message.edit_text("❌ You don't manage any groups.", reply_markup=menus.back_button())
+        await callback.answer()
+        return
+
+    group = groups[0]
+    item_count = await session.scalar(select(func.count()).select_from(AcademicItem).where(AcademicItem.group_id == group.id))
+    low_conf = await session.scalar(select(func.count()).select_from(AcademicItem).where(AcademicItem.group_id == group.id, AcademicItem.status == "new"))
+    dup_count = await session.scalar(select(func.count()).select_from(DuplicateLog).where(DuplicateLog.group_id == group.id))
+    reminder_count = await session.scalar(
+        select(func.count())
+        .select_from(Reminder)
+        .join(AcademicItem, AcademicItem.id == Reminder.item_id)
+        .where(AcademicItem.group_id == group.id, Reminder.sent == False, Reminder.cancelled == False)  # noqa: E712
+    )
+
+    text = (
+        f"📊 <b>Analytics Overview</b>\n\n"
+        f"<b>Group</b>: {html.escape(group.department or 'Group')}\n"
+        f"<b>Detected items</b>: <code>{item_count or 0}</code>\n"
+        f"<b>Low confidence</b>: <code>{low_conf or 0}</code>\n"
+        f"<b>Pending reminders</b>: <code>{reminder_count or 0}</code>\n"
+        f"<b>Suppressed duplicates</b>: <code>{dup_count or 0}</code>"
+    )
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=menus.cat_analytics())
+    await callback.answer()
+
+
+@router.callback_query(F.data == "menu:logs_recent")
+async def cb_menu_logs_recent(callback: types.CallbackQuery, session: AsyncSession) -> None:
+    from sqlalchemy import select
+    from app.database.models import AcademicItem, DuplicateLog
+
+    groups = await crud.get_managed_groups(session, callback.from_user.id)
+    if not groups:
+        await callback.message.edit_text("❌ You don't manage any groups.", reply_markup=menus.back_button())
+        await callback.answer()
+        return
+
+    group = groups[0]
+    items = (
+        await session.execute(
+            select(AcademicItem)
+            .where(AcademicItem.group_id == group.id)
+            .order_by(AcademicItem.created_at.desc())
+            .limit(5)
+        )
+    ).scalars().all()
+    duplicates = (
+        await session.execute(
+            select(DuplicateLog)
+            .where(DuplicateLog.group_id == group.id)
+            .order_by(DuplicateLog.created_at.desc())
+            .limit(5)
+        )
+    ).scalars().all()
+
+    lines = ["🧾 <b>Recent Runtime Logs</b>", ""]
+    if items:
+        lines.append("<b>Latest detections</b>")
+        for item in items:
+            lines.append(
+                f"• <code>{item.created_at.strftime('%m-%d %H:%M')}</code> {html.escape(item.item_type)} — {html.escape(item.title or 'Untitled')}"
+            )
+        lines.append("")
+    if duplicates:
+        lines.append("<b>Latest suppressions</b>")
+        for log in duplicates:
+            lines.append(
+                f"• <code>{log.created_at.strftime('%m-%d %H:%M')}</code> item {log.existing_item_id} — {html.escape(log.reason or 'No reason')}"
+            )
+    if len(lines) == 2:
+        lines.append("No routing or suppression records yet.")
+
+    await callback.message.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=menus.cat_analytics())
     await callback.answer()
 
 
@@ -847,7 +933,7 @@ async def cb_view_audit(callback: types.CallbackQuery, session: AsyncSession) ->
         stmt = (
             select(AuditLog)
             .where(AuditLog.chat_id == group.chat_id)
-            .order_by(AuditLog.timestamp.desc())
+            .order_by(AuditLog.created_at.desc())
             .limit(10)
         )
         result = await session.execute(stmt)
@@ -859,9 +945,10 @@ async def cb_view_audit(callback: types.CallbackQuery, session: AsyncSession) ->
             return
         lines = [f"📝 <b>Audit Logs for {html.escape(group.department or 'Group')}</b>"]
         for log in logs:
-            time_str = escape_md(log.timestamp.strftime("%Y-%m-%d %H:%M"))
-            action = escape_md(log.action)
-            lines.append(f"• <code>{time_str}</code>: {action}")
+            time_str = html.escape(log.created_at.strftime("%Y-%m-%d %H:%M"))
+            action = html.escape(log.action)
+            details = f" — {html.escape(log.details)}" if log.details else ""
+            lines.append(f"• <code>{time_str}</code>: {action}{details}")
         await callback.message.edit_text(
             "\n".join(lines), parse_mode="HTML", reply_markup=menus.back_button()
         )
@@ -895,7 +982,7 @@ async def cb_set_safety(callback: types.CallbackQuery, session: AsyncSession) ->
             await crud.update_fields(session, Group, group.id, ai_moderation_enabled=new_status)
             status_str = "ON 🛡️" if new_status else "OFF ⚠️"
             await callback.message.edit_text(
-                f"AI Safety Filter for **{escape_md(group.department or 'Group')}** is now {status_str}\.",
+                f"AI Safety Filter for <b>{html.escape(group.department or 'Group')}</b> is now {status_str}.",
                 parse_mode="HTML",
                 reply_markup=menus.back_button(),
             )

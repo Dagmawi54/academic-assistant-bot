@@ -1,67 +1,60 @@
-"""Command handlers: /start, /help, /menu, /status, /ask.
+"""Command handlers: /start, /help, /menu, /status, /ask."""
 
-All commands use StateFilter("*") so they work even when
-the user is in the middle of an FSM wizard (e.g. Add Course).
-"""
-
-from aiogram import Router, types, F, Bot
+from aiogram import Bot, F, Router, types
 from aiogram.filters import Command, StateFilter
-from aiogram.fsm.state import any_state
 from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import any_state
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admin import menus
 from app.admin.permissions import is_admin_in_any_group
 from app.database import crud
+from app.utils.text import sanitize_telegram_html
+
 import html
+
 router = Router(name="commands")
 
 
-# ---------- /start ----------
 @router.message(Command("start"), StateFilter(any_state), F.chat.type == "private")
 async def cmd_start(message: types.Message, state: FSMContext, session: AsyncSession) -> None:
     """Welcome message + admin menu if applicable."""
     await state.clear()
     user_id = message.from_user.id
-    name = escape_md(message.from_user.first_name or "there")
+    name = html.escape(message.from_user.first_name or "there")
 
-    is_admin = await is_admin_in_any_group(session, user_id)
-
-    if is_admin:
-        text = (
-            f"👋 Welcome, *{name}*\!\n\n"
-            "You have admin access\. Use the menu below to manage your groups\."
+    if await is_admin_in_any_group(session, user_id):
+        await message.answer(
+            f"👋 <b>Welcome, {name}</b>\n\nYou have admin access. Use the menu below to manage your groups.",
+            reply_markup=menus.main_menu(),
+            parse_mode="HTML",
         )
-        await message.answer(text, reply_markup=menus.main_menu())
-    else:
-        text = (
-            f"👋 Hi, *{name}*\!\n\n"
-            "I'm the Academic Assistant Bot\. "
-            "I help manage course information, assignments, and reminders "
-            "in your university group\.\n\n"
-            "If you're a group admin, add me to your group and use /menu here to configure\."
-        )
-        await message.answer(text)
+        return
+
+    await message.answer(
+        f"👋 <b>Hi, {name}</b>\n\n"
+        "I'm the Academic Assistant Bot. I help manage course information, assignments, and reminders in your university group.\n\n"
+        "If you're a group admin, add me to your group and use /menu here to configure.",
+        parse_mode="HTML",
+    )
 
 
-# ---------- /help ----------
 @router.message(Command("help"), StateFilter(any_state))
 async def cmd_help(message: types.Message, state: FSMContext) -> None:
     """Show available commands."""
     await state.clear()
     text = (
         "<b>Available Commands</b>\n\n"
-        "<code>/start</code> — Start the bot\n"
-        "<code>/help</code> — Show this message\n"
-        "<code>/menu</code> — Open admin menu (DM only)\n"
-        "<code>/status</code> — Show group info\n"
-        "<code>/ask</code> — Ask the AI a question\n"
-        "<code>/sync_admin</code> — Sync your admin role (in group)"
+        "<code>/start</code> - Start the bot\n"
+        "<code>/help</code> - Show this message\n"
+        "<code>/menu</code> - Open admin menu (DM only)\n"
+        "<code>/status</code> - Show group info\n"
+        "<code>/ask</code> - Ask the AI a question\n"
+        "<code>/sync_admin</code> - Sync your admin role (in group)"
     )
-    await message.answer(text)
+    await message.answer(text, parse_mode="HTML")
 
 
-# ---------- /menu ----------
 @router.message(Command("menu"), StateFilter(any_state), F.chat.type == "private")
 async def cmd_menu(message: types.Message, state: FSMContext, session: AsyncSession) -> None:
     """Show admin menu (DM only)."""
@@ -70,38 +63,37 @@ async def cmd_menu(message: types.Message, state: FSMContext, session: AsyncSess
 
     if is_admin:
         managed = await crud.get_managed_groups(session, message.from_user.id)
-        group_names = ", ".join([html.escape(g.department) for g in managed if g.department]) or "None"
+        group_names = ", ".join(html.escape(g.department) for g in managed if g.department) or "None"
         await message.answer(
-            f"⚙️ <b>Admin Menu</b>\n_Managing groups:_ {group_names}",
+            f"⚙️ <b>Admin Menu</b>\n<i>Managing groups:</i> {group_names}",
             reply_markup=menus.main_menu(),
+            parse_mode="HTML",
         )
-    else:
-        text = (
-            "⚠️ You don't have admin access to any registered active groups.\n\n"
-            "If you are simply a student reading announcements, you don't need this menu!\n\n"
-            "If you are a Telegram administrator in a registered group, go to that group and type <code>/sync_admin</code> first.\n\n"
-            "If you just added me to a <b>new</b> group and want to become the Owner to manage it, click below to set it up:"
-        )
-        await message.answer(text, reply_markup=menus.unregistered_menu())
+        return
+
+    text = (
+        "⚠️ You don't have admin access to any registered active groups.\n\n"
+        "If you are simply a student reading announcements, you don't need this menu.\n\n"
+        "If you are a Telegram administrator in a registered group, go to that group and type <code>/sync_admin</code> first.\n\n"
+        "If you just added me to a <b>new</b> group and want to become the owner to manage it, click below to set it up:"
+    )
+    await message.answer(text, reply_markup=menus.unregistered_menu(), parse_mode="HTML")
 
 
-# ---------- /status ----------
 @router.message(Command("status"), StateFilter(any_state))
 async def cmd_status(message: types.Message, state: FSMContext, session: AsyncSession) -> None:
     """Show current group/semester status."""
     await state.clear()
-    chat_id = message.chat.id
-    group = await crud.get_group_by_chat_id(session, chat_id)
+    group = await crud.get_group_by_chat_id(session, message.chat.id)
 
     if not group:
-        await message.answer("❓ This group is not registered. Ask an admin to set it up.")
+        await message.answer("❓ This group is not registered. Ask an admin to set it up.", parse_mode="HTML")
         return
 
     courses = await crud.get_active_courses(session, group.id)
     course_list = ", ".join(html.escape(c.course_name) for c in courses) or "None"
-
     text = (
-        f"📊 <b>Group Status</b>\n\n"
+        "📊 <b>Group Status</b>\n\n"
         f"<code>Department</code> {html.escape(group.department or 'Not set')}\n"
         f"<code>Year</code> {group.year or 'Not set'}\n"
         f"<code>Section</code> {html.escape(group.section or 'Not set')}\n"
@@ -109,7 +101,7 @@ async def cmd_status(message: types.Message, state: FSMContext, session: AsyncSe
         f"<code>Courses</code> {course_list}\n"
         f"<code>Active</code> {'Yes' if group.active else 'No'}"
     )
-    await message.answer(text)
+    await message.answer(text, parse_mode="HTML")
 
 
 @router.message(Command("debug_runtime"), StateFilter(any_state), F.chat.type == "private")
@@ -125,10 +117,7 @@ async def cmd_debug_runtime(
         return
 
     from app.bot import bot, storage
-    from app.services.runtime_diagnostics import (
-        collect_runtime_diagnostics,
-        render_runtime_diagnostics,
-    )
+    from app.services.runtime_diagnostics import collect_runtime_diagnostics, render_runtime_diagnostics
 
     report = await collect_runtime_diagnostics(bot=bot, session=session, fsm_storage=storage)
     text = render_runtime_diagnostics(report)
@@ -137,15 +126,13 @@ async def cmd_debug_runtime(
     await message.answer(text, parse_mode="HTML")
 
 
-# ---------- Callback: back to main menu ----------
 @router.callback_query(F.data == "menu:main")
 async def cb_main_menu(callback: types.CallbackQuery) -> None:
     """Return to main admin menu."""
-    await callback.message.edit_text("⚙️ <b>Admin Menu</b>", reply_markup=menus.main_menu())
+    await callback.message.edit_text("⚙️ <b>Admin Menu</b>", reply_markup=menus.main_menu(), parse_mode="HTML")
     await callback.answer()
 
 
-# ---------- Callback: cancel any wizard ----------
 @router.callback_query(F.data == "cancel", StateFilter(any_state))
 async def cb_cancel(callback: types.CallbackQuery, state: FSMContext) -> None:
     """Cancel any active FSM flow."""
@@ -153,11 +140,11 @@ async def cb_cancel(callback: types.CallbackQuery, state: FSMContext) -> None:
     await callback.message.edit_text(
         "❌ Cancelled. Use /menu to start again.",
         reply_markup=menus.back_button(),
+        parse_mode="HTML",
     )
     await callback.answer()
 
 
-# ---------- /ask (text-only) ----------
 @router.message(Command("ask"), StateFilter(any_state), F.document == None)
 async def cmd_ask(message: types.Message, state: FSMContext) -> None:
     """Ask the AI a text-only question."""
@@ -173,17 +160,14 @@ async def cmd_ask(message: types.Message, state: FSMContext) -> None:
         )
         return
 
-    query = args[1].strip()
-    await _process_ask(message, query, file_context=None)
+    await _process_ask(message, args[1].strip(), file_context=None)
 
 
-# ---------- /ask (with document) ----------
 @router.message(Command("ask"), StateFilter(any_state), F.document != None)
 async def cmd_ask_with_file(message: types.Message, state: FSMContext, bot: Bot) -> None:
     """Ask the AI a question about an attached document."""
     await state.clear()
-    
-    # Extract question from caption
+
     caption = message.caption or ""
     args = caption.split(maxsplit=1)
     query = args[1].strip() if len(args) >= 2 else "Summarize and analyze this document."
@@ -199,7 +183,6 @@ async def cmd_ask_with_file(message: types.Message, state: FSMContext, bot: Bot)
         )
         return
 
-    # Size guard (5MB max)
     if doc.file_size and doc.file_size > 5 * 1024 * 1024:
         await message.answer("File too large (max 5MB).", parse_mode=None)
         return
@@ -210,7 +193,7 @@ async def cmd_ask_with_file(message: types.Message, state: FSMContext, bot: Bot)
         file = await bot.download(doc)
         file_bytes = file.read()
 
-        from app.files.parser import extract_text_from_pdf, extract_text_from_docx
+        from app.files.parser import extract_text_from_docx, extract_text_from_pdf
 
         extracted = None
         if ext == "pdf":
@@ -227,14 +210,12 @@ async def cmd_ask_with_file(message: types.Message, state: FSMContext, bot: Bot)
             )
             return
 
-        # Truncate extracted text to keep within token limits
         if len(extracted) > 8000:
             extracted = extracted[:8000] + "\n\n... (document truncated)"
 
         await status_msg.edit_text("⏳ Analyzing document...", parse_mode=None)
         file_context = f"--- DOCUMENT: {file_name} ---\n{extracted}\n--- END DOCUMENT ---"
         await _process_ask(message, query, file_context=file_context, status_msg=status_msg)
-
     except Exception as e:
         try:
             await status_msg.edit_text(f"Error reading file: {str(e)[:200]}", parse_mode=None)
@@ -260,7 +241,10 @@ async def _process_ask(
 
     if getattr(message, "reply_to_message", None) and message.reply_to_message.text:
         role = "the assistant" if message.reply_to_message.from_user.id == message.bot.id else "another user"
-        reply_context = f"[Replying to a previous message from {role}]:\n{message.reply_to_message.text}\n\n[My new question]:\n"
+        reply_context = (
+            f"[Replying to a previous message from {role}]:\n{message.reply_to_message.text}\n\n"
+            "[My new question]:\n"
+        )
         user_content = reply_context + user_content
 
     try:
@@ -268,11 +252,10 @@ async def _process_ask(
             "You are a highly intelligent, sophisticated academic and technical assistant built specifically "
             "for Academic Group Management. "
             "IMPORTANT TELEGRAM HTML FORMATTING RULES:\n"
-            "1. NEVER use Markdown (**, *, #). It will look broken. Only use HTML: <b>bold</b>, <i>italic</i>, <code>code</code>.\n"
-            "2. NEVER use asterisks (*) or hyphens (-) for lists. Use real bullets (•) or emojis (📌, ◾️, ✅).\n"
-            "3. Structure your response with visually distinct sections. Use <b>SECTION TITLE</b> for headers, and leave a blank line before and after.\n"
-            "4. Use <blockquote>text</blockquote> heavily whenever you are stating an important rule, a direct quote, or a core summary.\n"
-            "5. Keep the text highly scannable, beautifully spaced, and avoid dense walls of text."
+            "1. NEVER use Markdown. Only use HTML: <b>bold</b>, <i>italic</i>, <code>code</code>.\n"
+            "2. Keep responses clean and scannable.\n"
+            "3. Use <blockquote> only when it genuinely improves readability.\n"
+            "4. Do not expose raw HTML tags to the user."
         )
         if file_context:
             sys_prompt += " If a document is provided, thoroughly analyze its contents and draw heavily from it."
@@ -282,18 +265,13 @@ async def _process_ask(
             {"role": "user", "content": user_content},
         ]
         result = await chatbot_client.complete(messages)
-
-        answer_text = None
-        if result:
-            answer_text = result.get("raw") or None
+        answer_text = result.get("raw") if result else None
 
         if answer_text:
             if len(answer_text) > 4000:
                 answer_text = answer_text[:4000] + "\n\n... (truncated)"
-            
-            from app.utils.text import sanitize_telegram_html
+
             safe_html = sanitize_telegram_html(answer_text)
-            
             try:
                 await status_msg.edit_text(safe_html, parse_mode="HTML")
             except Exception:
@@ -303,8 +281,7 @@ async def _process_ask(
                     await status_msg.edit_text("Got a response but couldn't display it.", parse_mode=None)
         else:
             await status_msg.edit_text(
-                "Sorry, I couldn't reach the AI services right now. "
-                "Check that GROQ_API_KEY or GEMINI_API_KEY env vars are configured on Render.",
+                "Sorry, I couldn't reach the AI services right now. Check that GROQ_API_KEY or GEMINI_API_KEY env vars are configured on Render.",
                 parse_mode=None,
             )
     except Exception as e:
@@ -312,4 +289,3 @@ async def _process_ask(
             await status_msg.edit_text(f"Error: {str(e)[:200]}", parse_mode=None)
         except Exception:
             pass
-

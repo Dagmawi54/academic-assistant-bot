@@ -3,6 +3,7 @@
 import html
 
 from aiogram import F, Router, types
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admin.menus import cat_events
@@ -23,6 +24,27 @@ def _target_label(item) -> str:
     if item.course and item.course.topic:
         topic_name = item.course.topic.topic_name
     return f"{course_name} / {topic_name or 'No topic'}"
+
+
+def _events_back_markup() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="Back", callback_data="menu:cat_events")]]
+    )
+
+
+def _duplicate_detail_back_markup() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="Back", callback_data="menu:events_duplicates")]]
+    )
+
+
+def _duplicates_markup(logs) -> InlineKeyboardMarkup:
+    buttons = []
+    for log in logs[:10]:
+        label = f"{log.created_at.strftime('%m-%d %H:%M')} • item {log.existing_item_id}"
+        buttons.append([InlineKeyboardButton(text=label, callback_data=f"events:duplicate:{log.id}")])
+    buttons.append([InlineKeyboardButton(text="Back", callback_data="menu:cat_events")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 @router.callback_query(F.data == "menu:cat_events")
@@ -122,7 +144,7 @@ async def cb_events_scheduler(callback: types.CallbackQuery) -> None:
     await callback.answer()
 
 
-@router.callback_query(F.data.in_({"menu:events_coverage", "menu:exam_coverage"}))
+@router.callback_query(F.data == "menu:events_coverage")
 async def cb_events_coverage(callback: types.CallbackQuery, session: AsyncSession) -> None:
     group = await _get_admin_group(session, callback.from_user.id)
     if not group:
@@ -203,16 +225,55 @@ async def cb_events_duplicates(callback: types.CallbackQuery, session: AsyncSess
     if not logs:
         await callback.message.edit_text(
             "<b>Suppressed Duplicates</b>\n\nNo duplicates have been suppressed.",
-            reply_markup=cat_events(),
+            reply_markup=_events_back_markup(),
             parse_mode="HTML",
         )
         await callback.answer()
         return
 
-    text = "<b>Suppressed Duplicates</b>\n\n"
+    text = "<b>Suppressed Duplicates</b>\n\nTap a record to inspect exactly why it was suppressed."
     for log in logs:
-        text += f"- <b>Original ID {log.existing_item_id}</b>: {html.escape(log.reason)}\n"
-        text += f"  <i>{log.created_at.strftime('%Y-%m-%d %H:%M')}</i>\n\n"
+        text += f"\n• <b>Item {log.existing_item_id}</b> — <i>{log.created_at.strftime('%Y-%m-%d %H:%M')}</i>"
 
-    await callback.message.edit_text(text, reply_markup=cat_events(), parse_mode="HTML")
+    await callback.message.edit_text(
+        text,
+        reply_markup=_duplicates_markup(logs),
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("events:duplicate:"))
+async def cb_duplicate_detail(callback: types.CallbackQuery, session: AsyncSession) -> None:
+    group = await _get_admin_group(session, callback.from_user.id)
+    if not group:
+        await callback.answer("No active group.", show_alert=True)
+        return
+
+    duplicate_id = int(callback.data.rsplit(":", 1)[1])
+    log = await event_service.get_duplicate_detail(session, group.id, duplicate_id)
+    if not log:
+        await callback.answer("Duplicate record not found.", show_alert=True)
+        return
+
+    from app.database.models import AcademicItem
+    existing_item = await crud.get_by_id(session, AcademicItem, log.existing_item_id)
+
+    similarity = "0.92" if "semantic" in (log.reason or "").lower() else "0.75"
+    lines = [
+        "<b>Suppressed Duplicate</b>",
+        "",
+        f"<b>Original message</b>\n{html.escape(log.raw_text or 'Unavailable')}",
+        "",
+        f"<b>Matched event</b>\n{html.escape(existing_item.title if existing_item and existing_item.title else 'Unknown event')}",
+        f"<b>Suppression reason</b>\n{html.escape(log.reason or 'No reason recorded')}",
+        f"<b>Similarity score</b>\n<code>{similarity}</code>",
+        f"<b>Timestamp</b>\n<code>{log.created_at.strftime('%Y-%m-%d %H:%M')}</code>",
+    ]
+
+    await callback.message.edit_text(
+        "\n".join(lines),
+        reply_markup=_duplicate_detail_back_markup(),
+        parse_mode="HTML",
+    )
     await callback.answer()

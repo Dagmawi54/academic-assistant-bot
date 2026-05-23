@@ -5,7 +5,7 @@ from sqlalchemy import select, and_, or_, desc, asc
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.database.models import AcademicItem, Course, Reminder, DuplicateLog
+from app.database.models import AcademicItem, Course, DuplicateLog, Reminder
 
 
 async def get_upcoming_events(session: AsyncSession, group_id: int) -> Sequence[AcademicItem]:
@@ -97,6 +97,20 @@ async def get_exam_coverages(session: AsyncSession, group_id: int) -> Sequence[A
     )
     result = await session.execute(stmt)
     return result.scalars().all()
+
+
+async def get_duplicate_detail(
+    session: AsyncSession,
+    group_id: int,
+    duplicate_id: int,
+) -> DuplicateLog | None:
+    """Fetch a single duplicate suppression record scoped to a group."""
+    stmt = select(DuplicateLog).where(
+        DuplicateLog.group_id == group_id,
+        DuplicateLog.id == duplicate_id,
+    )
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none()
 
 
 def get_scheduler_jobs() -> list[dict[str, str | int | None]]:

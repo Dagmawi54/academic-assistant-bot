@@ -5,11 +5,15 @@ from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admin import menus
-from app.admin.states import AnnouncementStates
+from app.admin.states import AnnouncementStates, ExamCoverageStates
 from app.database import crud
 from app.database.models import Group, Course, Topic
 from app.logging import get_logger
 import html
+
+from app.services.announcement_formatter import format_announcement_html
+from app.services.exam_coverage_service import create_exam_coverage_entry
+
 logger = get_logger("communications_handler")
 router = Router(name="communications")
 
@@ -28,7 +32,8 @@ async def start_communication(callback: types.CallbackQuery, state: FSMContext, 
     if not managed_groups:
         await callback.message.edit_text(
             "❌ You do not manage any registered groups.",
-            reply_markup=menus.back_button()
+            reply_markup=menus.back_button(),
+            parse_mode="HTML",
         )
         await callback.answer()
         return
@@ -67,7 +72,7 @@ async def _process_group_selection(callback: types.CallbackQuery, state: FSMCont
         if not general:
             await callback.message.edit_text(
                 "❌ This group has no registered General topic. Someone needs to send a message in General or type <code>/scan_topics</code> there first.",
-                reply_markup=menus.cancel_only(),
+                reply_markup=menus.cancel_button(),
                 parse_mode="HTML"
             )
             await callback.answer()
@@ -79,7 +84,7 @@ async def _process_group_selection(callback: types.CallbackQuery, state: FSMCont
             f"📢 <b>Broadcasting to {html.escape(group.department)}</b> (General)\n\n"
             "Send the message you want to broadcast (text, photo, document, etc.):\n"
             "_(Type or forward a message here)_",
-            reply_markup=menus.cancel_only(),
+            reply_markup=menus.cancel_button(),
             parse_mode="HTML"
         )
         await callback.answer()
@@ -90,7 +95,7 @@ async def _process_group_selection(callback: types.CallbackQuery, state: FSMCont
         if not courses:
             await callback.message.edit_text(
                 "❌ No active courses found in this group.",
-                reply_markup=menus.cancel_only(),
+                reply_markup=menus.cancel_button(),
                 parse_mode="HTML"
             )
             await callback.answer()
@@ -110,23 +115,23 @@ async def _process_group_selection(callback: types.CallbackQuery, state: FSMCont
 async def cb_select_course(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
     course_id = int(callback.data.split(":")[1])
     course = await crud.get_by_id(session, Course, course_id)
-    
-    if not course.forum_topic_id:
+
+    if not course or not course.topic_id:
         await callback.message.edit_text(
-            f"❌ The course <b>{html.escape(course.course_name)}</b> is not linked to any forum topic.",
-            reply_markup=menus.cancel_only(),
+            f"❌ The course <b>{html.escape(course.course_name if course else 'Unknown')}</b> is not linked to any forum topic.",
+            reply_markup=menus.cancel_button(),
             parse_mode="HTML"
         )
         await callback.answer()
         return
 
-    await state.update_data(topic_id=course.forum_topic_id)
+    await state.update_data(topic_id=course.topic_id)
     await state.set_state(AnnouncementStates.waiting_content)
     await callback.message.edit_text(
         f"🎯 <b>Targeting: {html.escape(course.course_name)}</b>\n\n"
         "Send the message you want to push (text, photo, document, etc.):\n"
         "_(Type or forward a message here)_",
-        reply_markup=menus.cancel_only(),
+        reply_markup=menus.cancel_button(),
         parse_mode="HTML"
     )
     await callback.answer()
@@ -136,7 +141,20 @@ async def cb_select_course(callback: types.CallbackQuery, state: FSMContext, ses
 async def receive_content(message: types.Message, state: FSMContext) -> None:
     """Store the message ID that the user wants to broadcast."""
     # We store the message object ID to copy it later
-    await state.update_data(message_id=message.message_id)
+    await state.update_data(
+        message_id=message.message_id,
+        source_chat_id=message.chat.id,
+        content_text=message.text or message.caption or "",
+        has_media=bool(
+            message.photo
+            or message.document
+            or message.video
+            or message.voice
+            or message.audio
+            or message.animation
+            or message.sticker
+        ),
+    )
     
     data = await state.get_data()
     target_type = data["target_type"]
@@ -146,7 +164,7 @@ async def receive_content(message: types.Message, state: FSMContext) -> None:
     action = "Broadcast" if target_type == "broadcast" else "Push"
     
     await message.answer(
-        f"✅ Message received! Review it above.\n\n"
+        f"✅ Message received. Review it above.\n\n"
         f"Are you sure you want to {action.lower()} this message?",
         reply_markup=menus.confirm_action("send_push"),
         parse_mode="HTML"
@@ -159,6 +177,9 @@ async def confirm_send_push(callback: types.CallbackQuery, state: FSMContext, se
     topic_id = data["topic_id"]
     msg_id = data["message_id"]
     user_id = callback.from_user.id
+    source_chat_id = data.get("source_chat_id", callback.message.chat.id)
+    content_text = data.get("content_text", "")
+    has_media = data.get("has_media", False)
     
     topic = await crud.get_by_id(session, Topic, topic_id)
     
@@ -173,19 +194,27 @@ async def confirm_send_push(callback: types.CallbackQuery, state: FSMContext, se
 
     # Use copy_message to support all types (text, photos, docs)
     try:
-        if topic.message_thread_id and topic.message_thread_id > 0:
-            await bot.copy_message(
+        if content_text and not has_media:
+            await bot.send_message(
                 chat_id=topic.chat_id,
-                from_chat_id=callback.message.chat.id,
-                message_id=msg_id,
-                message_thread_id=topic.message_thread_id
+                text=format_announcement_html(content_text),
+                message_thread_id=topic.message_thread_id if topic.message_thread_id and topic.message_thread_id > 0 else None,
+                parse_mode="HTML",
             )
         else:
-            await bot.copy_message(
-                chat_id=topic.chat_id,
-                from_chat_id=callback.message.chat.id,
-                message_id=msg_id
-            )
+            if topic.message_thread_id and topic.message_thread_id > 0:
+                await bot.copy_message(
+                    chat_id=topic.chat_id,
+                    from_chat_id=source_chat_id,
+                    message_id=msg_id,
+                    message_thread_id=topic.message_thread_id
+                )
+            else:
+                await bot.copy_message(
+                    chat_id=topic.chat_id,
+                    from_chat_id=source_chat_id,
+                    message_id=msg_id
+                )
             
         await crud.log_action(
             session,
@@ -209,3 +238,170 @@ async def confirm_send_push(callback: types.CallbackQuery, state: FSMContext, se
         )
     
     await callback.answer()
+
+
+@router.callback_query(F.data == "menu:exam_coverage")
+async def start_exam_coverage(
+    callback: types.CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+) -> None:
+    """Begin manual exam coverage entry."""
+    await state.clear()
+    managed_groups = await crud.get_managed_groups(session, callback.from_user.id)
+    if not managed_groups:
+        await callback.message.edit_text(
+            "❌ You do not manage any registered groups.",
+            reply_markup=menus.back_button(),
+            parse_mode="HTML",
+        )
+        await callback.answer()
+        return
+
+    if len(managed_groups) == 1:
+        await _start_exam_coverage_for_group(callback, state, session, managed_groups[0].id)
+    else:
+        await state.set_state(ExamCoverageStates.waiting_group_select)
+        await callback.message.edit_text(
+            "📘 <b>Select the group for this exam coverage entry:</b>",
+            reply_markup=menus.group_select(managed_groups),
+            parse_mode="HTML",
+        )
+        await callback.answer()
+
+
+@router.callback_query(ExamCoverageStates.waiting_group_select, F.data.startswith("group:"))
+async def cb_exam_coverage_group(
+    callback: types.CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+) -> None:
+    await _start_exam_coverage_for_group(callback, state, session, int(callback.data.split(":")[1]))
+
+
+async def _start_exam_coverage_for_group(
+    callback: types.CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+    group_id: int,
+) -> None:
+    courses = await crud.get_active_courses(session, group_id)
+    if not courses:
+        await callback.message.edit_text(
+            "❌ No active courses found in this group yet.",
+            reply_markup=menus.back_button(),
+            parse_mode="HTML",
+        )
+        await callback.answer()
+        return
+
+    await state.update_data(group_id=group_id)
+    await state.set_state(ExamCoverageStates.waiting_course)
+    await callback.message.edit_text(
+        "📘 <b>Select the course for this coverage update:</b>",
+        reply_markup=menus.course_select(courses),
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.callback_query(ExamCoverageStates.waiting_course, F.data.startswith("course:"))
+async def cb_exam_coverage_course(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
+    course_id = int(callback.data.split(":")[1])
+    course = await crud.get_by_id(session, Course, course_id)
+    if not course:
+        await callback.answer("Course not found.", show_alert=True)
+        return
+    await state.update_data(course_id=course_id, course_name=course.course_name)
+    await state.set_state(ExamCoverageStates.waiting_exam_type)
+    await callback.message.edit_text(
+        f"📘 <b>{html.escape(course.course_name)}</b>\n\nSelect the exam type:",
+        reply_markup=menus.exam_type_select(),
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.callback_query(ExamCoverageStates.waiting_exam_type, F.data.startswith("exam_type:"))
+async def cb_exam_coverage_type(callback: types.CallbackQuery, state: FSMContext) -> None:
+    exam_type = callback.data.split(":", 1)[1]
+    if exam_type == "custom":
+        exam_type = "custom exam"
+    await state.update_data(exam_type=exam_type)
+    await state.set_state(ExamCoverageStates.waiting_chapters)
+    await callback.message.edit_text(
+        "📝 Send the coverage details.\n\nExamples:\n• covers chapter 1-4\n• excluding recursion",
+        reply_markup=menus.cancel_button(),
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.message(ExamCoverageStates.waiting_chapters, F.chat.type == "private")
+async def msg_exam_coverage_chapters(message: types.Message, state: FSMContext) -> None:
+    await state.update_data(coverage_text=message.text.strip())
+    await state.set_state(ExamCoverageStates.waiting_notes)
+    await message.answer(
+        "Add optional notes for students, or type <code>skip</code>.",
+        reply_markup=menus.cancel_button(),
+        parse_mode="HTML",
+    )
+
+
+@router.message(ExamCoverageStates.waiting_notes, F.chat.type == "private")
+async def msg_exam_coverage_notes(message: types.Message, state: FSMContext, session: AsyncSession) -> None:
+    notes = None if message.text.strip().lower() == "skip" else message.text.strip()
+    data = await state.get_data()
+    course = await crud.get_by_id(session, Course, data["course_id"])
+    exam_type = data["exam_type"].replace("_", " ").title()
+    coverage_text = data["coverage_text"]
+    summary = (
+        f"📘 <b>{html.escape(course.course_name if course else 'Course')} {html.escape(exam_type)} Coverage</b>\n\n"
+        f"{html.escape(coverage_text)}"
+    )
+    if notes:
+        summary += f"\n\n<i>{html.escape(notes)}</i>"
+    summary += "\n\nConfirm posting this coverage update?"
+    await state.update_data(notes=notes)
+    await state.set_state(ExamCoverageStates.confirm_post)
+    await message.answer(
+        summary,
+        reply_markup=menus.confirm_action("exam_coverage_post"),
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(ExamCoverageStates.confirm_post, F.data == "confirm:exam_coverage_post")
+async def cb_exam_coverage_confirm(
+    callback: types.CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+) -> None:
+    data = await state.get_data()
+    group = await crud.get_by_id(session, Group, data["group_id"])
+    course = await crud.get_by_id(session, Course, data["course_id"])
+    topic = await crud.get_by_id(session, Topic, course.topic_id) if course and course.topic_id else None
+
+    if not group or not course:
+        await callback.answer("Missing course context.", show_alert=True)
+        return
+
+    item = await create_exam_coverage_entry(
+        session,
+        group=group,
+        course=course,
+        topic=topic,
+        exam_type=data["exam_type"],
+        coverage_text=data["coverage_text"],
+        notes=data.get("notes"),
+        created_by=callback.from_user.id,
+    )
+    await state.clear()
+    await callback.message.edit_text(
+        f"✅ <b>Coverage saved</b>\n\n"
+        f"{html.escape(course.course_name)} coverage is now recorded and visible in Events.\n"
+        f"<code>item_id={item.id}</code>",
+        reply_markup=menus.back_button(),
+        parse_mode="HTML",
+    )
+    await callback.answer("Coverage saved.")

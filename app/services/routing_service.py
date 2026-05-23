@@ -52,6 +52,15 @@ async def process_group_message(
         chat_id=chat_id,
         thread_id=thread_id,
     )
+    logger.info(
+        "academic_topic_context",
+        chat_id=chat_id,
+        thread_id=thread_id,
+        topic_id=topic_context.topic.id if topic_context.topic else None,
+        topic_name=topic_context.topic.topic_name if topic_context.topic else None,
+        course_id=topic_context.course.id if topic_context.course else None,
+        course_name=topic_context.course_name,
+    )
 
     # 2. Rule-based classification
     classification = classify(text)
@@ -97,6 +106,13 @@ async def process_group_message(
         ai_result = await _try_ai_extraction(text)
         if ai_result:
             classification = _merge_ai_result(classification, ai_result)
+            logger.info(
+                "academic_ai_extraction_merged",
+                chat_id=chat_id,
+                thread_id=thread_id,
+                ai_type=ai_result.get("type"),
+                ai_confidence=ai_result.get("confidence"),
+            )
 
     # 4. Resolve destination topic
     destination = await resolve_destination(session, group.id, classification)
@@ -104,8 +120,8 @@ async def process_group_message(
     # 5. Create academic item for ANY academic type (not just those with deadlines)
     item = None
     if classification.message_type in ACADEMIC_TYPES:
-        course = None
-        if classification.course_hint:
+        course = topic_context.course
+        if not course and classification.course_hint:
             course = await crud.get_course_by_name(session, group.id, classification.course_hint)
 
         # Duplicate detection check
@@ -113,6 +129,13 @@ async def process_group_message(
         from app.metrics.tracker import tracker
 
         await tracker.record_duplicate_check(suppressed=False)
+        logger.info(
+            "academic_duplicate_check_started",
+            group_id=group.id,
+            course_id=course.id if course else None,
+            item_type=classification.message_type.lower(),
+            deadline=str(classification.deadline) if classification.deadline else None,
+        )
         duplicate = await is_semantic_duplicate(
             session,
             group.id,
@@ -139,6 +162,7 @@ async def process_group_message(
             )
             await crud.create(session, duplicate_log)
             return
+        logger.info("academic_duplicate_check_clear", source_message_id=message_id)
 
         chat_link = None
         if chat_id and message_id:
@@ -179,6 +203,7 @@ async def process_group_message(
             from app.services.reminder_service import create_reminders_for_item_in_session
 
             await create_reminders_for_item_in_session(session, item)
+            logger.info("academic_reminders_created", item_id=item.id)
 
     # 6. Send detection feedback to the SOURCE topic (visible acknowledgment)
     if item:
@@ -221,6 +246,14 @@ async def process_group_message(
         event = ASSIGNMENT_DETECTED if item.item_type == "assignment" else EXAM_DETECTED
         logger.info("academic_event_emitted", item_id=item.id, event_name=event)
         await emit(event, item_id=item.id, reminders_already_created=True)
+    logger.info(
+        "academic_pipeline_finished",
+        chat_id=chat_id,
+        thread_id=thread_id,
+        message_id=message_id,
+        item_id=item.id if item else None,
+        item_type=item.item_type if item else None,
+    )
 
 
 def _build_contextual_title(message_type: str, course_name: str) -> str | None:
@@ -290,6 +323,12 @@ async def _try_ai_extraction(text: str) -> dict | None:
         if result:
             parsed = parse_extraction(result)
             if parsed:
+                logger.info(
+                    "academic_ai_extraction_result",
+                    ai_type=parsed.get("type"),
+                    ai_confidence=parsed.get("confidence"),
+                    ai_course=parsed.get("course"),
+                )
                 if "confidence" in parsed:
                     await tracker.record_ai_extraction(parsed["confidence"])
                 return parsed

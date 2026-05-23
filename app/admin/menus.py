@@ -10,9 +10,11 @@ from app.database.models import Course, Group, Topic
 def main_menu() -> InlineKeyboardMarkup:
     """Top-level admin menu."""
     buttons = [
-        [InlineKeyboardButton(text="Infrastructure", callback_data="menu:cat_infrastructure")],
-        [InlineKeyboardButton(text="Events", callback_data="menu:cat_events")],
+        [InlineKeyboardButton(text="Courses", callback_data="menu:cat_courses")],
+        [InlineKeyboardButton(text="Semester Management", callback_data="menu:semester")],
+        [InlineKeyboardButton(text="Broadcasting", callback_data="menu:announcements")],
         [InlineKeyboardButton(text="Communications", callback_data="menu:cat_communications")],
+        [InlineKeyboardButton(text="Events", callback_data="menu:cat_events")],
         [InlineKeyboardButton(text="Administration", callback_data="menu:cat_administration")],
         [InlineKeyboardButton(text="Analytics & Logs", callback_data="menu:cat_analytics")],
     ]
@@ -27,10 +29,13 @@ def unregistered_menu() -> InlineKeyboardMarkup:
 
 
 def cat_infrastructure() -> InlineKeyboardMarkup:
+    return cat_courses()
+
+
+def cat_courses() -> InlineKeyboardMarkup:
     buttons = [
         [InlineKeyboardButton(text="Setup Group", callback_data="menu:setup_group")],
         [InlineKeyboardButton(text="Add Course", callback_data="menu:add_course")],
-        [InlineKeyboardButton(text="Semester Control", callback_data="menu:semester")],
         [InlineKeyboardButton(text="Back", callback_data="menu:main")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -40,6 +45,7 @@ def cat_communications() -> InlineKeyboardMarkup:
     buttons = [
         [InlineKeyboardButton(text="Exam Coverage", callback_data="menu:exam_coverage")],
         [InlineKeyboardButton(text="Announcements", callback_data="menu:announcements")],
+        [InlineKeyboardButton(text="Targeted Course Push", callback_data="menu:targeted_push")],
         [InlineKeyboardButton(text="Back", callback_data="menu:main")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -56,6 +62,8 @@ def cat_administration() -> InlineKeyboardMarkup:
 
 def cat_analytics() -> InlineKeyboardMarkup:
     buttons = [
+        [InlineKeyboardButton(text="Analytics Overview", callback_data="menu:analytics_overview")],
+        [InlineKeyboardButton(text="Recent Logs", callback_data="menu:logs_recent")],
         [InlineKeyboardButton(text="View Audit Logs", callback_data="menu:audit")],
         [InlineKeyboardButton(text="View System Metrics", callback_data="menu:metrics")],
         [InlineKeyboardButton(text="Version Info", callback_data="menu:cmd_version")],
@@ -146,6 +154,13 @@ def cancel_only() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [InlineKeyboardButton(text="Done Adding Courses", callback_data="done_adding_courses")]
         ]
+    )
+
+
+def cancel_button() -> InlineKeyboardMarkup:
+    """Single cancel button for active FSM flows."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="Cancel", callback_data="cancel")]]
     )
 
 
