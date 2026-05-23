@@ -39,10 +39,16 @@ async def send_reminder(reminder_id: int) -> None:
         async with session.begin():
             reminder = await crud.get_by_id(session, Reminder, reminder_id)
             if not reminder or reminder.sent or reminder.cancelled:
+                logger.info(
+                    "reminder_skipped",
+                    reminder_id=reminder_id,
+                    reason="missing_sent_or_cancelled",
+                )
                 return
 
             item = await crud.get_by_id(session, AcademicItem, reminder.item_id)
             if not item:
+                logger.info("reminder_skipped", reminder_id=reminder_id, reason="missing_item")
                 return
 
             text = format_reminder(item)
@@ -65,7 +71,13 @@ async def send_reminder(reminder_id: int) -> None:
                     sent=True,
                     sent_at=now_addis(),
                 )
-                logger.info("reminder_sent", reminder_id=reminder_id, item_id=item.id)
+                logger.info(
+                    "reminder_sent",
+                    reminder_id=reminder_id,
+                    item_id=item.id,
+                    chat_id=reminder.chat_id,
+                    thread_id=reminder.thread_id,
+                )
             except Exception:
                 await tracker.record_reminder(success=False)
                 logger.exception("reminder_send_failed", reminder_id=reminder_id)
@@ -99,10 +111,25 @@ async def start_scheduler() -> None:
                         )
                         scheduled += 1
 
-            logger.info("scheduler_rebuild", pending=len(pending), scheduled=scheduled)
+            next_runs = [
+                f"{job.id}:{job.next_run_time.isoformat() if job.next_run_time else 'none'}"
+                for job in scheduler.get_jobs()
+            ]
+            logger.info(
+                "scheduler_rebuild",
+                pending=len(pending),
+                scheduled=scheduled,
+                total_jobs=len(scheduler.get_jobs()),
+                next_runs=next_runs[:10],
+            )
 
     scheduler.start()
-    logger.info("scheduler_started")
+    logger.info(
+        "scheduler_started",
+        running=scheduler.running,
+        jobstore_names=list(scheduler._jobstores.keys()),
+        job_count=len(scheduler.get_jobs()),
+    )
 
 
 def stop_scheduler() -> None:
@@ -123,4 +150,11 @@ def schedule_reminder(reminder_id: int, send_time: datetime) -> None:
         id=job_id,
         replace_existing=True,
     )
-    logger.info("academic_reminder_job_scheduled", reminder_id=reminder_id, send_time=str(send_time))
+    logger.info(
+        "academic_reminder_job_scheduled",
+        reminder_id=reminder_id,
+        job_id=job_id,
+        send_time=str(send_time),
+        scheduler_running=scheduler.running,
+        job_count=len(scheduler.get_jobs()),
+    )

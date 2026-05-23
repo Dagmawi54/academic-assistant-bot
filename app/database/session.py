@@ -3,6 +3,9 @@
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import settings
+from app.logging import get_logger
+
+logger = get_logger("database")
 
 engine = create_async_engine(
     settings.async_database_url,
@@ -33,6 +36,7 @@ async def init_db() -> None:
     # First transaction for table creation
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    logger.info("database_tables_checked")
         
     # Second, isolated transaction for the alter table hack so it doesn't rollback create_all if it fails
     try:
@@ -43,9 +47,9 @@ async def init_db() -> None:
             await conn.execute(
                 text("ALTER TABLE academic_items ADD COLUMN source_message_link VARCHAR(255)")
             )
-    except Exception:
+    except Exception as exc:
         # Postgres throws if column already exists
-        pass
+        logger.info("database_optional_migration_skipped", error_type=type(exc).__name__)
 
 
 async def close_db() -> None:

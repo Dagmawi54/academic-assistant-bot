@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import redis.asyncio as aioredis
 
@@ -14,7 +15,6 @@ logger = get_logger("cache")
 
 _redis: aioredis.Redis | None = None
 
-# Default TTL: 5 minutes
 DEFAULT_TTL = 300
 
 
@@ -24,9 +24,13 @@ async def init_cache() -> None:
     try:
         _redis = aioredis.from_url(settings.redis_url, decode_responses=True)
         await _redis.ping()
-        logger.info("redis_connected", url=settings.redis_url)
-    except Exception:
-        logger.warning("redis_unavailable", msg="Cache disabled — running without Redis")
+        logger.info("redis_connected", url=_safe_redis_url(settings.redis_url))
+    except Exception as exc:
+        logger.warning(
+            "redis_unavailable",
+            msg="Cache disabled - running without Redis",
+            error_type=type(exc).__name__,
+        )
         _redis = None
 
 
@@ -42,9 +46,12 @@ def _available() -> bool:
     return _redis is not None
 
 
-# ---------------------------------------------------------------------------
-# Generic cache operations
-# ---------------------------------------------------------------------------
+def _safe_redis_url(url: str) -> str:
+    parsed = urlsplit(url)
+    netloc = parsed.hostname or ""
+    if parsed.port:
+        netloc = f"{netloc}:{parsed.port}"
+    return urlunsplit((parsed.scheme, netloc, parsed.path, "", ""))
 
 
 async def get(key: str) -> Any | None:
@@ -70,7 +77,7 @@ async def set(key: str, value: Any, ttl: int = DEFAULT_TTL) -> None:
 
 
 async def delete(key: str) -> None:
-    """Delete a key from cache."""
+    """Delete a key."""
     if not _available():
         return
     try:
@@ -80,7 +87,7 @@ async def delete(key: str) -> None:
 
 
 async def invalidate_pattern(pattern: str) -> None:
-    """Delete all keys matching a pattern (e.g. 'group:123:*')."""
+    """Delete all keys matching a pattern."""
     if not _available():
         return
     try:
@@ -91,11 +98,6 @@ async def invalidate_pattern(pattern: str) -> None:
             await _redis.delete(*keys)  # type: ignore[union-attr]
     except Exception:
         logger.warning("cache_invalidate_failed", pattern=pattern)
-
-
-# ---------------------------------------------------------------------------
-# Domain-specific cache keys
-# ---------------------------------------------------------------------------
 
 
 def topic_key(chat_id: int) -> str:

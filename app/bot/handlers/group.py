@@ -66,12 +66,24 @@ async def handle_group_message(message: types.Message, session: AsyncSession) ->
         and not message.animation
         and not message.sticker
     ):
+        logger.info(
+            "group_message_ignored_empty",
+            chat_id=message.chat.id,
+            thread_id=message.message_thread_id,
+            message_id=message.message_id,
+        )
         return
 
     from app.database import crud
 
     group = await crud.get_group_by_chat_id(session, message.chat.id)
     if not group:
+        logger.info(
+            "group_message_unregistered_group",
+            chat_id=message.chat.id,
+            thread_id=message.message_thread_id,
+            message_id=message.message_id,
+        )
         return
 
     import uuid
@@ -103,6 +115,13 @@ async def handle_group_message(message: types.Message, session: AsyncSession) ->
                 status="active"
             )
             await crud.create(session, new_topic)
+            logger.info(
+                "topic_auto_registered",
+                group_id=group.id,
+                chat_id=chat_id,
+                thread_id=thread_id,
+                topic_name=topic_name,
+            )
 
     os.makedirs("app/storage/raw", exist_ok=True)
 
@@ -162,6 +181,12 @@ async def handle_group_message(message: types.Message, session: AsyncSession) ->
     # If it's JUST an animation or sticker and passed moderation, we ignore it for academic routing
     if message.animation or message.sticker:
         if not text:
+            logger.info(
+                "group_message_ignored_media_only",
+                chat_id=chat_id,
+                thread_id=thread_id,
+                message_id=message_id,
+            )
             return
 
     # Process images with OCR
@@ -213,6 +238,12 @@ async def handle_group_message(message: types.Message, session: AsyncSession) ->
                 text = f"{text}\n\n[Audio Transcript]:\n{transcript}".strip()
 
     if not text:
+        logger.info(
+            "group_message_ignored_no_extracted_text",
+            chat_id=chat_id,
+            thread_id=thread_id,
+            message_id=message_id,
+        )
         return
 
     logger.info(

@@ -112,6 +112,31 @@ async def cmd_status(message: types.Message, state: FSMContext, session: AsyncSe
     await message.answer(text)
 
 
+@router.message(Command("debug_runtime"), StateFilter(any_state), F.chat.type == "private")
+async def cmd_debug_runtime(
+    message: types.Message,
+    state: FSMContext,
+    session: AsyncSession,
+) -> None:
+    """Show live runtime diagnostics for admins."""
+    await state.clear()
+    if not await is_admin_in_any_group(session, message.from_user.id):
+        await message.answer("You do not have admin access to runtime diagnostics.", parse_mode=None)
+        return
+
+    from app.bot import bot, storage
+    from app.services.runtime_diagnostics import (
+        collect_runtime_diagnostics,
+        render_runtime_diagnostics,
+    )
+
+    report = await collect_runtime_diagnostics(bot=bot, session=session, fsm_storage=storage)
+    text = render_runtime_diagnostics(report)
+    if len(text) > 3900:
+        text = text[:3900] + "\n\n<code>... truncated</code>"
+    await message.answer(text, parse_mode="HTML")
+
+
 # ---------- Callback: back to main menu ----------
 @router.callback_query(F.data == "menu:main")
 async def cb_main_menu(callback: types.CallbackQuery) -> None:

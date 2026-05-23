@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from aiogram import types
 from fastapi import FastAPI, Request, Response
 
-from app.bot import bot, dp
+from app.bot import bot, dp, validate_fsm_storage
 from app.config import settings
 from app.database.session import init_db, close_db
 from app.cache.redis_cache import init_cache, close_cache
@@ -27,6 +27,10 @@ async def lifespan(application: FastAPI):  # noqa: ANN201, ARG001
 
     # Cache
     await init_cache()
+    logger.info("cache_checked")
+
+    # FSM storage
+    await validate_fsm_storage()
 
     # Register handlers (import triggers registration)
     from app.bot.handlers import register_all_handlers
@@ -64,10 +68,10 @@ async def lifespan(application: FastAPI):  # noqa: ANN201, ARG001
     if settings.use_polling:
         logger.info("polling_mode", msg="Using polling (dev mode)")
         import asyncio
-        polling_task = asyncio.create_task(dp.start_polling(bot, drop_pending_updates=True))
+        polling_task = asyncio.create_task(dp.start_polling(bot, drop_pending_updates=False))
     else:
         webhook_url = settings.webhook_url
-        await bot.set_webhook(webhook_url, drop_pending_updates=True)
+        await bot.set_webhook(webhook_url, drop_pending_updates=False)
         logger.info("webhook_set", url=webhook_url)
 
     yield
