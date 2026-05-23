@@ -18,6 +18,9 @@ from app.logging import get_logger
 
 logger = get_logger("routing_service")
 
+# Academic types that should always create an AcademicItem
+ACADEMIC_TYPES = {"ASSIGNMENT", "EXAM", "EXAM_COVERAGE", "SCHEDULE_UPDATE", "GENERAL_EVENT", "COURSE_EVENT"}
+
 
 async def process_group_message(
     session: AsyncSession,
@@ -43,11 +46,12 @@ async def process_group_message(
         msg_type=classification.message_type,
         confidence=classification.confidence,
         course=classification.course_hint,
+        deadline=str(classification.deadline) if classification.deadline else None,
     )
 
     # Skip non-academic messages (DISCUSSION or UNKNOWN)
     if classification.message_type in ("DISCUSSION", "UNKNOWN"):
-        # If the rule-based engine is reasonably sure it's just chat, 
+        # If the rule-based engine is reasonably sure it's just chat,
         # or if the message is very short, do NOT call the expensive AI.
         if classification.confidence >= 0.5 or len(text.split()) < 3:
             return  # Clearly not academic or too short to be meaningful
@@ -73,12 +77,9 @@ async def process_group_message(
     # 4. Resolve destination topic
     destination = await resolve_destination(session, group.id, classification)
 
-    # 5. Create academic item if it has a deadline or structured content
+    # 5. Create academic item for ANY academic type (not just those with deadlines)
     item = None
-    if (
-        classification.message_type in ("ASSIGNMENT", "EXAM", "EXAM_COVERAGE")
-        and classification.deadline
-    ):
+    if classification.message_type in ACADEMIC_TYPES:
         course = None
         if classification.course_hint:
             course = await crud.get_course_by_name(session, group.id, classification.course_hint)
@@ -99,7 +100,7 @@ async def process_group_message(
         if duplicate:
             await tracker.record_duplicate_check(suppressed=True)
             logger.info("skipped_duplicate_item", duplicate_id=duplicate.id)
-            
+
             from app.database.models import DuplicateLog
             duplicate_log = DuplicateLog(
                 group_id=group.id,
@@ -138,23 +139,81 @@ async def process_group_message(
         item = await crud.create(session, item)
         logger.info("item_created", item_id=item.id, item_type=item.item_type)
 
-    # 6. Send notification to destination topic (if found and auto-approved)
-    if destination and should_auto_approve(classification.confidence):
-        notification = format_academic_notification(classification, item)
+    # 6. Send detection feedback to the SOURCE topic (visible acknowledgment)
+    if item:
+        feedback = _build_detection_feedback(classification, item)
         try:
             await bot.send_message(
-                chat_id=destination.chat_id,
-                message_thread_id=destination.message_thread_id,
-                text=notification,
+                chat_id=chat_id,
+                message_thread_id=thread_id,
+                text=feedback,
+                parse_mode="HTML",
             )
-            logger.info("routed", destination_topic=destination.topic_name)
+            logger.info("detection_feedback_sent", item_id=item.id)
         except Exception:
-            logger.exception("routing_send_failed", topic_id=destination.id)
+            logger.exception("detection_feedback_failed", item_id=item.id)
 
-    # 7. Emit events for reminder creation
-    if item:
+    # 7. Send notification to destination topic (if different from source and auto-approved)
+    if item and destination and should_auto_approve(classification.confidence):
+        # Only route if destination is different from source
+        source_match = (destination.chat_id == chat_id and destination.message_thread_id == thread_id)
+        if not source_match:
+            notification = format_academic_notification(classification, item)
+            try:
+                await bot.send_message(
+                    chat_id=destination.chat_id,
+                    message_thread_id=destination.message_thread_id,
+                    text=notification,
+                    parse_mode="HTML",
+                )
+                logger.info("routed", destination_topic=destination.topic_name)
+            except Exception:
+                logger.exception("routing_send_failed", topic_id=destination.id)
+
+    # 8. Emit events for reminder creation
+    if item and item.deadline:
         event = ASSIGNMENT_DETECTED if item.item_type == "assignment" else EXAM_DETECTED
         await emit(event, item_id=item.id)
+
+
+def _build_detection_feedback(classification: ClassificationResult, item: AcademicItem) -> str:
+    """Build a visible detection feedback message for the source topic."""
+    type_icons = {
+        "ASSIGNMENT": "📝",
+        "EXAM": "📋",
+        "EXAM_COVERAGE": "📖",
+        "SCHEDULE_UPDATE": "🔄",
+        "GENERAL_EVENT": "📢",
+        "COURSE_EVENT": "📌",
+    }
+    icon = type_icons.get(classification.message_type, "📌")
+    type_label = classification.message_type.replace("_", " ").title()
+
+    lines = [f"✅ <b>{icon} {type_label} Detected</b>"]
+
+    if classification.title:
+        lines.append(f"  <i>{classification.title}</i>")
+
+    if classification.deadline:
+        from app.utils.timezone import format_datetime
+        lines.append(f"  📅 {format_datetime(classification.deadline)}")
+
+    if classification.room:
+        lines.append(f"  🏛 Room: {classification.room}")
+
+    if classification.coverage:
+        lines.append(f"  📖 Coverage: {classification.coverage}")
+
+    if classification.course_hint:
+        lines.append(f"  📚 Course: {classification.course_hint}")
+
+    conf_pct = int(classification.confidence * 100)
+    lines.append(f"  <code>Confidence: {conf_pct}%</code>")
+
+    if item.deadline:
+        lines.append("\n⏰ <i>Reminders will be scheduled automatically.</i>")
+
+    return "\n".join(lines)
 
 
 async def _try_ai_extraction(text: str) -> dict | None:

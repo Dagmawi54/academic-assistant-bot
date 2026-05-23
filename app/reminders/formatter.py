@@ -45,7 +45,9 @@ def format_academic_notification(
     """Format a new academic item notification (posted on detection).
 
     Style: calm, structured, informative.
+    Uses Telegram HTML format.
     """
+    import html
     type_labels = {
         "ASSIGNMENT": "📝 Assignment",
         "EXAM": "📋 Exam",
@@ -56,27 +58,27 @@ def format_academic_notification(
     }
 
     label = type_labels.get(classification.message_type, "📌 Update")
-    title = escape_md(classification.title or classification.message_type.replace("_", " ").title())
+    title = html.escape(classification.title or classification.message_type.replace("_", " ").title())
 
-    lines = [f"<b>{escape_md(label)}</b>"]
-    lines.append(f"_{title}_")
+    lines = [f"<b>{html.escape(label)}</b>"]
+    lines.append(f"<i>{title}</i>")
     lines.append("")
 
     if classification.deadline:
         lines.append(f"<code>Deadline</code>")
-        lines.append(f"{escape_md(format_datetime(classification.deadline))}")
+        lines.append(f"{html.escape(format_datetime(classification.deadline))}")
         lines.append("")
 
     if classification.room:
-        lines.append(f"<code>Room</code> {escape_md(classification.room)}")
+        lines.append(f"<code>Room</code> {html.escape(classification.room)}")
         lines.append("")
 
     if classification.coverage:
         lines.append(f"<code>Coverage</code>")
-        lines.append(escape_md(classification.coverage))
+        lines.append(html.escape(classification.coverage))
         lines.append("")
 
     if classification.course_hint:
-        lines.append(f"<code>Course</code> {escape_md(classification.course_hint)}")
+        lines.append(f"<code>Course</code> {html.escape(classification.course_hint)}")
 
     return "\n".join(lines)

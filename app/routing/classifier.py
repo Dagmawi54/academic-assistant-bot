@@ -2,7 +2,7 @@
 
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 from dateutil import parser as dateparser
@@ -222,7 +222,43 @@ def _extract_course(text: str) -> str | None:
 
 
 def _extract_date(text: str) -> datetime | None:
-    """Extract a date from text."""
+    """Extract a date from text, including relative dates like 'monday', 'tomorrow'."""
+    lower = text.lower()
+    now = datetime.now()
+
+    # --- Relative date patterns ---
+    DAY_NAMES = {
+        "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
+        "friday": 4, "saturday": 5, "sunday": 6,
+        "mon": 0, "tue": 1, "tues": 1, "wed": 2, "thu": 3, "thur": 3,
+        "fri": 4, "sat": 5, "sun": 6,
+    }
+
+    if "tomorrow" in lower:
+        return now + timedelta(days=1)
+    if "day after tomorrow" in lower:
+        return now + timedelta(days=2)
+    if "today" in lower:
+        return now
+    if "next week" in lower:
+        return now + timedelta(days=7)
+
+    # Match day names: "on monday", "this friday", "next tuesday"
+    day_match = re.search(
+        r"\b(?:on|this|next|coming)?\s*"
+        r"(monday|tuesday|wednesday|thursday|friday|saturday|sunday"
+        r"|mon|tue|tues|wed|thu|thur|fri|sat|sun)\b",
+        lower,
+    )
+    if day_match:
+        target_day = DAY_NAMES.get(day_match.group(1))
+        if target_day is not None:
+            days_ahead = (target_day - now.weekday()) % 7
+            if days_ahead == 0:
+                days_ahead = 7  # If "monday" and today is monday, means next monday
+            return now + timedelta(days=days_ahead)
+
+    # --- Absolute date patterns ---
     for pattern in DATE_PATTERNS:
         match = pattern.search(text)
         if match:

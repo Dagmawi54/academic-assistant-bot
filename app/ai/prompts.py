@@ -13,8 +13,11 @@ CRITICAL RULES:
 
 def build_extraction_prompt(text: str) -> list[dict[str, str]]:
     """Build the extraction prompt for a message."""
+    import datetime
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     return [
-        {"role": "system", "content": EXTRACTION_SYSTEM_PROMPT},
+        {"role": "system", "content": f"{EXTRACTION_SYSTEM_PROMPT}\n\n[CONTEXT]\nToday's date and time is: {now_str}. Use this to resolve relative dates."},
+
         {
             "role": "user",
             "content": f"""Analyze this university group message and extract academic information.
