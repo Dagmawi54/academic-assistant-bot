@@ -15,17 +15,26 @@ DEFAULT_MODEL = "gemini-2.5-flash"
 class GeminiClient:
     """Async Gemini client for fallback extraction."""
 
-    def __init__(self) -> None:
-        self.is_configured = bool(settings.gemini_api_key)
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        default_model: str = DEFAULT_MODEL,
+        client_name: str = "gemini",
+    ) -> None:
+        self._api_key = api_key if api_key is not None else settings.gemini_api_key
+        self._default_model = default_model
+        self._client_name = client_name
+        self.is_configured = bool(self._api_key)
         if self.is_configured:
-            genai.configure(api_key=settings.gemini_api_key)
+            genai.configure(api_key=self._api_key)
             # Create generative model with JSON output setting if supported
             # For gemini-1.5, response_mime_type="application/json" is valid
             self.model = genai.GenerativeModel(
-                DEFAULT_MODEL, generation_config={"response_mime_type": "application/json"}
+                self._default_model, generation_config={"response_mime_type": "application/json"}
             )
         else:
-            logger.warning("gemini_no_key", msg="GEMINI_API_KEY not set — fallback disabled.")
+            logger.warning("gemini_no_key", client=self._client_name)
 
     async def complete(
         self,
@@ -46,7 +55,7 @@ class GeminiClient:
             # but simpler approach: combine them for the prompt.
             # Using system_instruction arg supported in recent SDKs:
             model = genai.GenerativeModel(
-                DEFAULT_MODEL,
+                self._default_model,
                 system_instruction=system_instruction,
                 generation_config={"response_mime_type": "application/json"},
             )
@@ -56,7 +65,7 @@ class GeminiClient:
         for attempt in range(max_retries):
             try:
                 content = await loop.run_in_executor(None, _generate)
-                logger.info("gemini_success", model=DEFAULT_MODEL)
+                logger.info("gemini_success", client=self._client_name, model=self._default_model)
                 try:
                     return json.loads(content)
                 except json.JSONDecodeError:

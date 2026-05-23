@@ -2,7 +2,6 @@
 
 from app.database.models import AcademicItem
 from app.routing.classifier import ClassificationResult
-from app.utils.text import escape_md
 from app.utils.timezone import format_datetime
 
 
@@ -10,29 +9,31 @@ def format_reminder(item: AcademicItem) -> str:
     """Format a reminder notification message.
 
     Style: calm, readable, non-spammy, minimal emojis.
-    Uses Telegram MarkdownV2.
+    Uses Telegram HTML format.
     """
+    import html
+
     # Title
-    title = escape_md(item.title or f"{item.item_type.title()}")
+    title = html.escape(item.title or f"{item.item_type.title()}")
     lines = [f"<b>{title} — Reminder</b>"]
     lines.append("")
 
     # Deadline
     if item.deadline:
         lines.append(f"<code>Deadline</code>")
-        lines.append(f"{escape_md(format_datetime(item.deadline))} \\(Addis Ababa Time\\)")
+        lines.append(f"{html.escape(format_datetime(item.deadline))} (Addis Ababa Time)")
         lines.append("")
 
     # Room
     if item.room:
         lines.append(f"<code>Room</code>")
-        lines.append(escape_md(item.room))
+        lines.append(html.escape(item.room))
         lines.append("")
 
     # Coverage
     if item.coverage:
         lines.append(f"<code>Coverage</code>")
-        lines.append(escape_md(item.coverage))
+        lines.append(html.escape(item.coverage))
         lines.append("")
 
     return "\n".join(lines)

@@ -1,7 +1,7 @@
 """Reminder service — create, cancel, rebuild reminders from academic items."""
 
 from app.database import crud
-from app.database.models import AcademicItem, Reminder
+from app.database.models import AcademicItem, Course, Reminder, Topic
 from app.database.session import async_session_factory
 from app.config import settings
 from app.utils.timezone import reminder_times
@@ -15,53 +15,58 @@ async def create_reminders_for_item(item_id: int) -> None:
     async with async_session_factory() as session:
         async with session.begin():
             item = await crud.get_by_id(session, AcademicItem, item_id)
-            if not item or not item.deadline:
-                return
+            await create_reminders_for_item_in_session(session, item)
 
-            # Determine destination topic
-            if item.course_id:
-                course = await crud.get_by_id(
-                    session,
-                    __import__("app.database.models", fromlist=["Course"]).Course,
-                    item.course_id,
-                )
-                thread_id = None
-                if course and course.topic_id:
-                    topic = await crud.get_by_id(
-                        session,
-                        __import__("app.database.models", fromlist=["Topic"]).Topic,
-                        course.topic_id,
-                    )
-                    thread_id = topic.message_thread_id if topic else None
-            else:
-                thread_id = None
 
-            # Generate reminder times
-            times = reminder_times(item.deadline, settings.reminder_offsets_hours)
+async def create_reminders_for_item_in_session(
+    session,
+    item: AcademicItem | None,
+) -> list[Reminder]:
+    """Create reminder entries using the caller's active transaction."""
+    if not item or not item.deadline:
+        logger.info(
+            "academic_reminder_rows_created",
+            item_id=item.id if item else None,
+            count=0,
+            reason="missing_item_or_deadline",
+        )
+        return []
 
-            for send_time in times:
-                reminder = Reminder(
-                    item_id=item.id,
-                    chat_id=item.source_chat_id or 0,
-                    thread_id=thread_id,
-                    send_time=send_time,
-                )
-                session.add(reminder)
-            
-            # Flush to get reminder IDs
-            await session.flush()
-            
-            # Now schedule the active jobs in APScheduler
-            from app.reminders.scheduler import schedule_reminder
-            for r in session.new:
-                if isinstance(r, Reminder):
-                    schedule_reminder(r.id, r.send_time)
+    thread_id = None
+    if item.course_id:
+        course = await crud.get_by_id(session, Course, item.course_id)
+        if course and course.topic_id:
+            topic = await crud.get_by_id(session, Topic, course.topic_id)
+            thread_id = topic.message_thread_id if topic else None
 
-            logger.info(
-                "reminders_created",
-                item_id=item_id,
-                count=len(times),
-            )
+    times = reminder_times(item.deadline, settings.reminder_offsets_hours)
+    reminders = [
+        Reminder(
+            item_id=item.id,
+            chat_id=item.source_chat_id or 0,
+            thread_id=thread_id,
+            send_time=send_time,
+        )
+        for send_time in times
+    ]
+
+    for reminder in reminders:
+        session.add(reminder)
+
+    await session.flush()
+
+    from app.reminders.scheduler import schedule_reminder
+
+    for reminder in reminders:
+        schedule_reminder(reminder.id, reminder.send_time)
+
+    logger.info(
+        "academic_reminder_rows_created",
+        item_id=item.id,
+        count=len(reminders),
+        thread_id=thread_id,
+    )
+    return reminders
 
 
 async def recreate_reminders_for_item(item_id: int) -> None:

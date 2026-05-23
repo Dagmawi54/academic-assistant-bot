@@ -56,12 +56,17 @@ EXAM_KEYWORDS = {
 COVERAGE_KEYWORDS = {
     "coverage",
     "chapters",
+    "chapter",
     "covered",
     "covers",
     "scope",
     "topics covered",
     "exam coverage",
     "will cover",
+    "excluding",
+    "excluded",
+    "except",
+    "not including",
 }
 
 SCHEDULE_KEYWORDS = {
@@ -147,8 +152,11 @@ def classify(text: str) -> ClassificationResult:
         "GENERAL_EVENT": _score_keywords(lower, GENERAL_KEYWORDS),
     }
 
-    # Boost scores based on extracted entities
-    if deadline:
+    # Boost scores based on extracted entities only when academic words are present.
+    # A casual question like "anyone have the notes from today?" should not become
+    # an assignment just because it contains a relative date.
+    has_academic_signal = any(score > 0 for score in scores.values())
+    if deadline and has_academic_signal:
         scores["ASSIGNMENT"] += 0.15
         scores["EXAM"] += 0.10
 
@@ -278,9 +286,12 @@ def _extract_room(text: str) -> str | None:
 def _extract_coverage(text: str) -> str | None:
     """Extract coverage/chapter information."""
     patterns = [
-        re.compile(r"chapter[s]?\s*[:-]?\s*(.+?)(?:.|$)", re.IGNORECASE),
-        re.compile(r"covers?\s+(.+?)(?:.|$)", re.IGNORECASE),
-        re.compile(r"ch.?\s*(\d[\d\s,-&and]+)", re.IGNORECASE),
+        re.compile(r"\bexcluding\s+(.+?)(?:[.!?\n]|$)", re.IGNORECASE),
+        re.compile(r"\bexcept\s+(.+?)(?:[.!?\n]|$)", re.IGNORECASE),
+        re.compile(r"\bnot\s+including\s+(.+?)(?:[.!?\n]|$)", re.IGNORECASE),
+        re.compile(r"\bchapter[s]?\s*[:-]?\s*(.+?)(?:[.!?\n]|$)", re.IGNORECASE),
+        re.compile(r"\bcovers?\s+(.+?)(?:[.!?\n]|$)", re.IGNORECASE),
+        re.compile(r"\bch\.?\s*(\d[\d\s,\-&]*(?:and\s+\d+)?)", re.IGNORECASE),
     ]
     for p in patterns:
         match = p.search(text)

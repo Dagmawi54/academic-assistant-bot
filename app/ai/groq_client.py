@@ -19,10 +19,21 @@ DEFAULT_MODEL = "llama-3.3-70b-versatile"
 class GroqClient:
     """Async Groq API client with retry and rate limiting."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        requests_per_minute: int | None = None,
+        default_model: str = DEFAULT_MODEL,
+        client_name: str = "groq",
+    ) -> None:
         self._client = httpx.AsyncClient(timeout=30.0)
+        self._api_key = api_key if api_key is not None else settings.groq_api_key
+        self._default_model = default_model
+        self._client_name = client_name
         self._last_request_time = 0.0
-        self._min_interval = 60.0 / settings.ai_requests_per_minute
+        rpm = requests_per_minute or settings.ai_requests_per_minute
+        self._min_interval = 60.0 / max(rpm, 1)
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -31,7 +42,7 @@ class GroqClient:
         self,
         messages: list[dict[str, str]],
         *,
-        model: str = DEFAULT_MODEL,
+        model: str | None = None,
         temperature: float = 0.1,
         max_tokens: int = 1024,
         response_format: dict | None = None,
@@ -42,17 +53,17 @@ class GroqClient:
         Returns:
             Parsed JSON response content.
         """
-        if not settings.groq_api_key:
-            logger.warning("groq_no_key", msg="GROQ_API_KEY not set — skipping AI")
+        if not self._api_key:
+            logger.warning("groq_no_key", client=self._client_name)
             return {}
 
         headers = {
-            "Authorization": f"Bearer {settings.groq_api_key}",
+            "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
         }
 
         payload: dict[str, Any] = {
-            "model": model,
+            "model": model or self._default_model,
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
@@ -71,7 +82,8 @@ class GroqClient:
                     content = data["choices"][0]["message"]["content"]
                     logger.info(
                         "groq_success",
-                        model=model,
+                        client=self._client_name,
+                        model=model or self._default_model,
                         tokens=data.get("usage", {}).get("total_tokens"),
                     )
                     # Try to parse as JSON
@@ -118,11 +130,11 @@ class GroqClient:
         max_retries: int = 3,
     ) -> str | None:
         """Transcribe audio using Groq's Whisper API."""
-        if not settings.groq_api_key:
+        if not self._api_key:
             return None
 
         headers = {
-            "Authorization": f"Bearer {settings.groq_api_key}",
+            "Authorization": f"Bearer {self._api_key}",
         }
 
         files = {

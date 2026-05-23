@@ -5,14 +5,14 @@ from sqlalchemy import select, and_, or_, desc, asc
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.database.models import AcademicItem, Reminder, DuplicateLog
+from app.database.models import AcademicItem, Course, Reminder, DuplicateLog
 
 
 async def get_upcoming_events(session: AsyncSession, group_id: int) -> Sequence[AcademicItem]:
     """Get chronological upcoming assignments, exams, and quizzes."""
     stmt = (
         select(AcademicItem)
-        .options(selectinload(AcademicItem.course))
+        .options(selectinload(AcademicItem.course).selectinload(Course.topic))
         .where(
             and_(
                 AcademicItem.group_id == group_id,
@@ -33,6 +33,7 @@ async def get_scheduled_reminders(session: AsyncSession, group_id: int) -> Seque
         select(Reminder)
         .options(
             selectinload(Reminder.academic_item).selectinload(AcademicItem.course)
+            .selectinload(Course.topic)
         )
         .join(AcademicItem, AcademicItem.id == Reminder.item_id)
         .where(
@@ -53,7 +54,7 @@ async def get_low_confidence_items(session: AsyncSession, group_id: int) -> Sequ
     """Get items needing admin review (status: new) or low confidence."""
     stmt = (
         select(AcademicItem)
-        .options(selectinload(AcademicItem.course))
+        .options(selectinload(AcademicItem.course).selectinload(Course.topic))
         .where(
             and_(
                 AcademicItem.group_id == group_id,
@@ -83,7 +84,7 @@ async def get_exam_coverages(session: AsyncSession, group_id: int) -> Sequence[A
     """Get structured coverage data."""
     stmt = (
         select(AcademicItem)
-        .options(selectinload(AcademicItem.course))
+        .options(selectinload(AcademicItem.course).selectinload(Course.topic))
         .where(
             and_(
                 AcademicItem.group_id == group_id,
@@ -96,3 +97,26 @@ async def get_exam_coverages(session: AsyncSession, group_id: int) -> Sequence[A
     )
     result = await session.execute(stmt)
     return result.scalars().all()
+
+
+def get_scheduler_jobs() -> list[dict[str, str | int | None]]:
+    """Return currently registered APScheduler jobs for dashboard visibility."""
+    from app.reminders.scheduler import scheduler
+
+    jobs = []
+    for job in scheduler.get_jobs():
+        reminder_id = None
+        if job.id.startswith("reminder_"):
+            try:
+                reminder_id = int(job.id.removeprefix("reminder_"))
+            except ValueError:
+                reminder_id = None
+
+        jobs.append(
+            {
+                "job_id": job.id,
+                "reminder_id": reminder_id,
+                "next_run_time": job.next_run_time.isoformat() if job.next_run_time else None,
+            }
+        )
+    return jobs

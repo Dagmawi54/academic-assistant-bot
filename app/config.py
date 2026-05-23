@@ -15,6 +15,12 @@ class Settings(BaseSettings):
     # AI
     groq_api_key: str = Field("", alias="GROQ_API_KEY")
     gemini_api_key: str = Field("", alias="GEMINI_API_KEY")
+    academic_groq_api_key: str = Field("", alias="ACADEMIC_GROQ_API_KEY")
+    academic_gemini_api_key: str = Field("", alias="ACADEMIC_GEMINI_API_KEY")
+    chatbot_groq_api_key: str = Field("", alias="CHATBOT_GROQ_API_KEY")
+    chatbot_gemini_api_key: str = Field("", alias="CHATBOT_GEMINI_API_KEY")
+    academic_extraction_model: str = Field("llama-3.1-8b-instant", alias="ACADEMIC_EXTRACTION_MODEL")
+    chatbot_model: str = Field("llama-3.3-70b-versatile", alias="CHATBOT_MODEL")
 
     # Database
     database_url: str = Field("sqlite+aiosqlite:///./bot.db", alias="DATABASE_URL")
@@ -62,6 +68,8 @@ class Settings(BaseSettings):
     # Rate Limiting
     throttle_rate: float = 0.5  # min seconds between messages per user
     ai_requests_per_minute: int = 30
+    academic_ai_requests_per_minute: int = Field(60, alias="ACADEMIC_AI_REQUESTS_PER_MINUTE")
+    chatbot_ai_requests_per_minute: int = Field(20, alias="CHATBOT_AI_REQUESTS_PER_MINUTE")
 
     # Render keep-alive (auto-provided by Render for web services)
     render_external_url: str = Field("", alias="RENDER_EXTERNAL_URL")

@@ -27,3 +27,6 @@ Thumbs.db
 
 # APScheduler
 jobs.sqlite
+
+# Local validation logs
+.codex-logs/

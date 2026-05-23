@@ -7,14 +7,14 @@ from app.database.models import AcademicItem
 from app.routing.classifier import classify, ClassificationResult
 from app.routing.router import resolve_destination
 from app.ai.confidence import should_auto_approve
-from app.ai.groq_client import groq_client
+from app.ai.academic_extraction_client import academic_extraction_client
 from app.ai.prompts import build_extraction_prompt
 from app.ai.extraction import parse_extraction
 from app.events.bus import emit, ASSIGNMENT_DETECTED, EXAM_DETECTED
 from app.bot import bot
 from app.reminders.formatter import format_academic_notification
-from app.utils.text import escape_md
 from app.logging import get_logger
+from app.services.topic_context import resolve_topic_context
 
 logger = get_logger("routing_service")
 
@@ -32,17 +32,41 @@ async def process_group_message(
     message_id: int,
 ) -> None:
     """Full message processing pipeline: classify → extract → route → notify."""
+    logger.info(
+        "academic_intake_received",
+        chat_id=chat_id,
+        thread_id=thread_id,
+        user_id=user_id,
+        message_id=message_id,
+        text_length=len(text),
+    )
 
     # 1. Ensure group is registered
     group = await crud.get_group_by_chat_id(session, chat_id)
     if not group:
         return  # Unregistered group — ignore
 
+    topic_context = await resolve_topic_context(
+        session,
+        group_id=group.id,
+        chat_id=chat_id,
+        thread_id=thread_id,
+    )
+
     # 2. Rule-based classification
     classification = classify(text)
+    if not classification.course_hint and topic_context.course_name:
+        classification.course_hint = topic_context.course_name
+        if not classification.title:
+            classification.title = _build_contextual_title(
+                classification.message_type,
+                topic_context.course_name,
+            )
+
     logger.info(
-        "classified",
+        "academic_classified",
         chat_id=chat_id,
+        thread_id=thread_id,
         msg_type=classification.message_type,
         confidence=classification.confidence,
         course=classification.course_hint,
@@ -99,7 +123,11 @@ async def process_group_message(
         )
         if duplicate:
             await tracker.record_duplicate_check(suppressed=True)
-            logger.info("skipped_duplicate_item", duplicate_id=duplicate.id)
+            logger.info(
+                "academic_duplicate_suppressed",
+                duplicate_id=duplicate.id,
+                source_message_id=message_id,
+            )
 
             from app.database.models import DuplicateLog
             duplicate_log = DuplicateLog(
@@ -137,7 +165,20 @@ async def process_group_message(
             raw_text=text,
         )
         item = await crud.create(session, item)
-        logger.info("item_created", item_id=item.id, item_type=item.item_type)
+        logger.info(
+            "academic_item_created",
+            item_id=item.id,
+            item_type=item.item_type,
+            course_id=item.course_id,
+            topic_id=topic_context.topic.id if topic_context.topic else None,
+            deadline=str(item.deadline) if item.deadline else None,
+            confidence=item.confidence,
+        )
+
+        if item.deadline:
+            from app.services.reminder_service import create_reminders_for_item_in_session
+
+            await create_reminders_for_item_in_session(session, item)
 
     # 6. Send detection feedback to the SOURCE topic (visible acknowledgment)
     if item:
@@ -149,7 +190,12 @@ async def process_group_message(
                 text=feedback,
                 parse_mode="HTML",
             )
-            logger.info("detection_feedback_sent", item_id=item.id)
+            logger.info(
+                "academic_ack_sent",
+                item_id=item.id,
+                chat_id=chat_id,
+                thread_id=thread_id,
+            )
         except Exception:
             logger.exception("detection_feedback_failed", item_id=item.id)
 
@@ -173,7 +219,21 @@ async def process_group_message(
     # 8. Emit events for reminder creation
     if item and item.deadline:
         event = ASSIGNMENT_DETECTED if item.item_type == "assignment" else EXAM_DETECTED
-        await emit(event, item_id=item.id)
+        logger.info("academic_event_emitted", item_id=item.id, event_name=event)
+        await emit(event, item_id=item.id, reminders_already_created=True)
+
+
+def _build_contextual_title(message_type: str, course_name: str) -> str | None:
+    labels = {
+        "ASSIGNMENT": "Assignment",
+        "EXAM": "Exam",
+        "EXAM_COVERAGE": "Exam Coverage",
+        "SCHEDULE_UPDATE": "Schedule Update",
+        "GENERAL_EVENT": "Notice",
+        "COURSE_EVENT": "Course Event",
+    }
+    label = labels.get(message_type)
+    return f"{course_name} - {label}" if label else None
 
 
 def _build_detection_feedback(classification: ClassificationResult, item: AcademicItem) -> str:
@@ -221,9 +281,9 @@ async def _try_ai_extraction(text: str) -> dict | None:
     from app.metrics.tracker import tracker
 
     try:
-        # Try Groq first
+        logger.info("academic_ai_extraction_attempted", provider="groq", text_length=len(text))
         messages = build_extraction_prompt(text)
-        result = await groq_client.complete(
+        result = await academic_extraction_client.complete_json(
             messages,
             response_format={"type": "json_object"},
         )
@@ -233,21 +293,7 @@ async def _try_ai_extraction(text: str) -> dict | None:
                 if "confidence" in parsed:
                     await tracker.record_ai_extraction(parsed["confidence"])
                 return parsed
-
-        # Fall back to Gemini if Groq fails or parses empty
-        from app.ai.gemini_client import gemini_client
-
-        if gemini_client.is_configured:
-            logger.info("groq_unsuccessful_falling_back_to_gemini")
-            await tracker.record_fallback_usage()
-            sys_prompt = build_extraction_prompt(text)[0]["content"]
-            user_prompt = build_extraction_prompt(text)[1]["content"]
-            gemini_result = await gemini_client.complete(sys_prompt, user_prompt)
-            if gemini_result:
-                parsed = parse_extraction(gemini_result)
-                if parsed and "confidence" in parsed:
-                    await tracker.record_ai_extraction(parsed["confidence"])
-                return parsed
+        await tracker.record_fallback_usage()
 
     except Exception:
         logger.exception("ai_extraction_failed")

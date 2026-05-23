@@ -224,7 +224,7 @@ async def _process_ask(
     status_msg: types.Message | None = None,
 ) -> None:
     """Shared AI query logic for text-only and file-attached /ask."""
-    from app.ai.groq_client import groq_client
+    from app.ai.chatbot_client import chatbot_client
 
     if not status_msg:
         status_msg = await message.answer("⏳ Thinking...", parse_mode=None)
@@ -256,23 +256,11 @@ async def _process_ask(
             {"role": "system", "content": sys_prompt},
             {"role": "user", "content": user_content},
         ]
-        result = await groq_client.complete(messages)
+        result = await chatbot_client.complete(messages)
 
         answer_text = None
         if result:
             answer_text = result.get("raw") or None
-
-        # If Groq failed or returned empty, try Gemini
-        if not answer_text:
-            try:
-                from app.ai.gemini_client import gemini_client
-
-                if gemini_client.is_configured:
-                    gem_result = await gemini_client.complete(sys_prompt, user_content)
-                    if gem_result:
-                        answer_text = gem_result.get("raw") or None
-            except Exception:
-                pass
 
         if answer_text:
             if len(answer_text) > 4000:

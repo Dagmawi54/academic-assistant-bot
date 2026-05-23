@@ -71,6 +71,18 @@ class TestEntityExtraction:
         assert result.coverage is not None
         assert "1-5" in result.coverage
 
+    def test_coverage_chapter_range(self):
+        result = classify("covers chapter 1-4")
+        assert result.message_type == "EXAM_COVERAGE"
+        assert result.coverage is not None
+        assert "1-4" in result.coverage
+
+    def test_coverage_exclusion(self):
+        result = classify("excluding recursion")
+        assert result.message_type == "EXAM_COVERAGE"
+        assert result.coverage is not None
+        assert "recursion" in result.coverage.lower()
+
 
 class TestMixedLanguage:
     """Test handling of Amharic-English mixed text."""

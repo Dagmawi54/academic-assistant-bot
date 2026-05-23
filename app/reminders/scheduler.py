@@ -54,6 +54,7 @@ async def send_reminder(reminder_id: int) -> None:
                     chat_id=reminder.chat_id,
                     message_thread_id=reminder.thread_id,
                     text=text,
+                    parse_mode="HTML",
                 )
                 await tracker.record_reminder(success=True)
 
@@ -122,4 +123,4 @@ def schedule_reminder(reminder_id: int, send_time: datetime) -> None:
         id=job_id,
         replace_existing=True,
     )
-    logger.info("reminder_scheduled", reminder_id=reminder_id, send_time=str(send_time))
+    logger.info("academic_reminder_job_scheduled", reminder_id=reminder_id, send_time=str(send_time))
