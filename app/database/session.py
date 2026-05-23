@@ -30,15 +30,19 @@ async def init_db() -> None:
     from app.database.models import Base
     from sqlalchemy import text
 
+    # First transaction for table creation
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        # Safely attempt to add the new column if it's an existing DB without wiping
-        try:
+        
+    # Second, isolated transaction for the alter table hack so it doesn't rollback create_all if it fails
+    try:
+        async with engine.begin() as conn:
             await conn.execute(
-                text("ALTER TABLE groups ADD COLUMN ai_moderation_enabled BOOLEAN DEFAULT 0")
+                text("ALTER TABLE groups ADD COLUMN ai_moderation_enabled BOOLEAN DEFAULT FALSE")
             )
-        except Exception:
-            pass
+    except Exception:
+        # Postgres throws if column already exists
+        pass
 
 
 async def close_db() -> None:
