@@ -12,6 +12,8 @@ async def main() -> None:
     print(f"last_error_present: {bool(info.last_error_message)}")
     me = await bot.get_me()
     print(f"bot_username: {me.username}")
+    print(f"can_read_all_group_messages: {getattr(me, 'can_read_all_group_messages', None)}")
+    print(f"can_join_groups: {getattr(me, 'can_join_groups', None)}")
     await bot.session.close()
 
 
