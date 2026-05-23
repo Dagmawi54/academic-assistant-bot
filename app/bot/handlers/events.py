@@ -5,7 +5,6 @@ from aiogram.filters import Command
 from sqlalchemy.ext.asyncio import AsyncSession
 import html
 
-from app.admin.permissions import require_role
 from app.admin.menus import cat_events
 from app.services import event_service
 from app.database import crud
@@ -20,18 +19,18 @@ async def _get_admin_group(session: AsyncSession, user_id: int):
     return groups[0] if groups else None
 
 
-@router.callback_query(F.data == "menu:cat_events", require_role(["owner", "dept_admin", "section_admin", "representative", "moderator"]))
+@router.callback_query(F.data == "menu:cat_events")
 async def cb_cat_events(callback: types.CallbackQuery) -> None:
     """Show the events management menu."""
     await callback.message.edit_text(
-        "📋 <b>Events &amp; Dashboard</b>\n\n"
+        "📋 <b>Events & Dashboard</b>\n\n"
         "View extracted events, upcoming deadlines, exam coverages, and system duplicates.",
         reply_markup=cat_events(),
         parse_mode="HTML"
     )
 
 
-@router.callback_query(F.data == "menu:events_upcoming", require_role(["owner", "dept_admin", "section_admin", "representative", "moderator"]))
+@router.callback_query(F.data == "menu:events_upcoming")
 async def cb_events_upcoming(callback: types.CallbackQuery, session: AsyncSession) -> None:
     group = await _get_admin_group(session, callback.from_user.id)
     if not group:
@@ -58,7 +57,7 @@ async def cb_events_upcoming(callback: types.CallbackQuery, session: AsyncSessio
     await callback.message.edit_text(text, reply_markup=cat_events(), parse_mode="HTML", disable_web_page_preview=True)
 
 
-@router.callback_query(F.data == "menu:events_reminders", require_role(["owner", "dept_admin", "section_admin", "representative", "moderator"]))
+@router.callback_query(F.data == "menu:events_reminders")
 async def cb_events_reminders(callback: types.CallbackQuery, session: AsyncSession) -> None:
     group = await _get_admin_group(session, callback.from_user.id)
     if not group:
@@ -84,7 +83,7 @@ async def cb_events_reminders(callback: types.CallbackQuery, session: AsyncSessi
     await callback.message.edit_text(text, reply_markup=cat_events(), parse_mode="HTML")
 
 
-@router.callback_query(F.data == "menu:events_coverage", require_role(["owner", "dept_admin", "section_admin", "representative", "moderator"]))
+@router.callback_query(F.data.in_({"menu:events_coverage", "menu:exam_coverage"}))
 async def cb_events_coverage(callback: types.CallbackQuery, session: AsyncSession) -> None:
     group = await _get_admin_group(session, callback.from_user.id)
     if not group:
@@ -113,7 +112,7 @@ async def cb_events_coverage(callback: types.CallbackQuery, session: AsyncSessio
     await callback.message.edit_text(text, reply_markup=cat_events(), parse_mode="HTML", disable_web_page_preview=True)
 
 
-@router.callback_query(F.data == "menu:events_review", require_role(["owner", "dept_admin", "section_admin", "representative", "moderator"]))
+@router.callback_query(F.data == "menu:events_review")
 async def cb_events_review(callback: types.CallbackQuery, session: AsyncSession) -> None:
     group = await _get_admin_group(session, callback.from_user.id)
     if not group:
@@ -140,7 +139,7 @@ async def cb_events_review(callback: types.CallbackQuery, session: AsyncSession)
     await callback.message.edit_text(text, reply_markup=cat_events(), parse_mode="HTML", disable_web_page_preview=True)
 
 
-@router.callback_query(F.data == "menu:events_duplicates", require_role(["owner", "dept_admin", "section_admin", "representative", "moderator"]))
+@router.callback_query(F.data == "menu:events_duplicates")
 async def cb_events_duplicates(callback: types.CallbackQuery, session: AsyncSession) -> None:
     group = await _get_admin_group(session, callback.from_user.id)
     if not group:
