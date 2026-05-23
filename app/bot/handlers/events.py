@@ -15,6 +15,11 @@ logger = get_logger("events_handler")
 router = Router(name="events")
 
 
+async def _get_admin_group(session: AsyncSession, user_id: int):
+    groups = await crud.get_managed_groups(session, user_id)
+    return groups[0] if groups else None
+
+
 @router.callback_query(F.data == "menu:cat_events", require_role(["owner", "dept_admin", "section_admin", "representative", "moderator"]))
 async def cb_cat_events(callback: types.CallbackQuery) -> None:
     """Show the events management menu."""
@@ -27,7 +32,7 @@ async def cb_cat_events(callback: types.CallbackQuery) -> None:
 
 @router.callback_query(F.data == "menu:events_upcoming", require_role(["owner", "dept_admin", "section_admin", "representative", "moderator"]))
 async def cb_events_upcoming(callback: types.CallbackQuery, session: AsyncSession) -> None:
-    group = await crud.get_group_by_chat_id(session, callback.message.chat.id)
+    group = await _get_admin_group(session, callback.from_user.id)
     if not group:
         await callback.answer("No active group.", show_alert=True)
         return
@@ -50,7 +55,7 @@ async def cb_events_upcoming(callback: types.CallbackQuery, session: AsyncSessio
 
 @router.callback_query(F.data == "menu:events_reminders", require_role(["owner", "dept_admin", "section_admin", "representative", "moderator"]))
 async def cb_events_reminders(callback: types.CallbackQuery, session: AsyncSession) -> None:
-    group = await crud.get_group_by_chat_id(session, callback.message.chat.id)
+    group = await _get_admin_group(session, callback.from_user.id)
     if not group:
         await callback.answer("No active group.", show_alert=True)
         return
@@ -72,7 +77,7 @@ async def cb_events_reminders(callback: types.CallbackQuery, session: AsyncSessi
 
 @router.callback_query(F.data == "menu:events_coverage", require_role(["owner", "dept_admin", "section_admin", "representative", "moderator"]))
 async def cb_events_coverage(callback: types.CallbackQuery, session: AsyncSession) -> None:
-    group = await crud.get_group_by_chat_id(session, callback.message.chat.id)
+    group = await _get_admin_group(session, callback.from_user.id)
     if not group:
         await callback.answer("No active group.", show_alert=True)
         return
@@ -97,7 +102,7 @@ async def cb_events_coverage(callback: types.CallbackQuery, session: AsyncSessio
 
 @router.callback_query(F.data == "menu:events_review", require_role(["owner", "dept_admin", "section_admin", "representative", "moderator"]))
 async def cb_events_review(callback: types.CallbackQuery, session: AsyncSession) -> None:
-    group = await crud.get_group_by_chat_id(session, callback.message.chat.id)
+    group = await _get_admin_group(session, callback.from_user.id)
     if not group:
         await callback.answer("No active group.", show_alert=True)
         return
@@ -120,7 +125,7 @@ async def cb_events_review(callback: types.CallbackQuery, session: AsyncSession)
 
 @router.callback_query(F.data == "menu:events_duplicates", require_role(["owner", "dept_admin", "section_admin", "representative", "moderator"]))
 async def cb_events_duplicates(callback: types.CallbackQuery, session: AsyncSession) -> None:
-    group = await crud.get_group_by_chat_id(session, callback.message.chat.id)
+    group = await _get_admin_group(session, callback.from_user.id)
     if not group:
         await callback.answer("No active group.", show_alert=True)
         return
