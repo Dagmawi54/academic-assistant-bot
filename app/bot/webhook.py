@@ -55,6 +55,11 @@ async def lifespan(application: FastAPI):  # noqa: ANN201, ARG001
     start_keep_alive(settings.render_external_url)
     logger.info("keep_alive_checked")
 
+    # Run startup diagnostics
+    from app.services.startup_service import run_startup_diagnostics
+    await run_startup_diagnostics(bot)
+    logger.info("startup_diagnostics_complete")
+
     # Webhook or polling
     if settings.use_polling:
         logger.info("polling_mode", msg="Using polling (dev mode)")

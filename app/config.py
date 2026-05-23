@@ -21,6 +21,7 @@ class Settings(BaseSettings):
 
     @property
     def async_database_url(self) -> str:
+        import re
         url = self.database_url
         if url.startswith("postgres://"):
             url = url.replace("postgres://", "postgresql+asyncpg://", 1)
@@ -32,6 +33,9 @@ class Settings(BaseSettings):
             url = url.replace("?sslmode=", "?ssl=")
         elif "&sslmode=" in url:
             url = url.replace("&sslmode=", "&ssl=")
+            
+        # asyncpg does not support 'channel_binding' (commonly added by Neon)
+        url = re.sub(r"([?&])channel_binding=[^&]*(&?)", lambda m: m.group(1) if m.group(2) == "&" and m.group(1) == "?" else (m.group(2) or ""), url)
             
         return url
 

@@ -13,8 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.admin import menus
 from app.admin.permissions import is_admin_in_any_group
 from app.database import crud
-from app.utils.text import escape_md
-
+import html
 router = Router(name="commands")
 
 
@@ -54,10 +53,10 @@ async def cmd_help(message: types.Message, state: FSMContext) -> None:
         "<b>Available Commands</b>\n\n"
         "<code>/start</code> — Start the bot\n"
         "<code>/help</code> — Show this message\n"
-        "<code>/menu</code> — Open admin menu \\(DM only\\)\n"
+        "<code>/menu</code> — Open admin menu (DM only)\n"
         "<code>/status</code> — Show group info\n"
         "<code>/ask</code> — Ask the AI a question\n"
-        "<code>/sync_admin</code> — Sync your admin role \\(in group\\)"
+        "<code>/sync_admin</code> — Sync your admin role (in group)"
     )
     await message.answer(text)
 
@@ -71,16 +70,16 @@ async def cmd_menu(message: types.Message, state: FSMContext, session: AsyncSess
 
     if is_admin:
         managed = await crud.get_managed_groups(session, message.from_user.id)
-        group_names = ", ".join([escape_md(g.department) for g in managed if g.department]) or "None"
+        group_names = ", ".join([html.escape(g.department) for g in managed if g.department]) or "None"
         await message.answer(
             f"⚙️ <b>Admin Menu</b>\n_Managing groups:_ {group_names}",
             reply_markup=menus.main_menu(),
         )
     else:
         text = (
-            "⚠️ You don't have admin access to any registered active groups\.\n\n"
-            "If you are simply a student reading announcements, you don't need this menu\!\n\n"
-            "If you are a Telegram administrator in a registered group, go to that group and type <code>/sync_admin</code> first\.\n\n"
+            "⚠️ You don't have admin access to any registered active groups.\n\n"
+            "If you are simply a student reading announcements, you don't need this menu!\n\n"
+            "If you are a Telegram administrator in a registered group, go to that group and type <code>/sync_admin</code> first.\n\n"
             "If you just added me to a <b>new</b> group and want to become the Owner to manage it, click below to set it up:"
         )
         await message.answer(text, reply_markup=menus.unregistered_menu())
@@ -95,17 +94,17 @@ async def cmd_status(message: types.Message, state: FSMContext, session: AsyncSe
     group = await crud.get_group_by_chat_id(session, chat_id)
 
     if not group:
-        await message.answer("❓ This group is not registered\. Ask an admin to set it up\.")
+        await message.answer("❓ This group is not registered. Ask an admin to set it up.")
         return
 
     courses = await crud.get_active_courses(session, group.id)
-    course_list = ", ".join(escape_md(c.course_name) for c in courses) or "None"
+    course_list = ", ".join(html.escape(c.course_name) for c in courses) or "None"
 
     text = (
         f"📊 <b>Group Status</b>\n\n"
-        f"<code>Department</code> {escape_md(group.department or 'Not set')}\n"
+        f"<code>Department</code> {html.escape(group.department or 'Not set')}\n"
         f"<code>Year</code> {group.year or 'Not set'}\n"
-        f"<code>Section</code> {escape_md(group.section or 'Not set')}\n"
+        f"<code>Section</code> {html.escape(group.section or 'Not set')}\n"
         f"<code>Semester</code> {group.semester or 'Not set'}\n"
         f"<code>Courses</code> {course_list}\n"
         f"<code>Active</code> {'Yes' if group.active else 'No'}"
@@ -127,7 +126,7 @@ async def cb_cancel(callback: types.CallbackQuery, state: FSMContext) -> None:
     """Cancel any active FSM flow."""
     await state.clear()
     await callback.message.edit_text(
-        "❌ Cancelled\. Use /menu to start again\.",
+        "❌ Cancelled. Use /menu to start again.",
         reply_markup=menus.back_button(),
     )
     await callback.answer()
@@ -176,7 +175,7 @@ async def cmd_ask_with_file(message: types.Message, state: FSMContext, bot: Bot)
         return
 
     # Size guard (5MB max)
-    if doc.file_size and doc.file_size > 5 <b> 1024 </b> 1024:
+    if doc.file_size and doc.file_size > 5 * 1024 * 1024:
         await message.answer("File too large (max 5MB).", parse_mode=None)
         return
 
@@ -278,8 +277,12 @@ async def _process_ask(
         if answer_text:
             if len(answer_text) > 4000:
                 answer_text = answer_text[:4000] + "\n\n... (truncated)"
+            
+            from app.utils.text import sanitize_telegram_html
+            safe_html = sanitize_telegram_html(answer_text)
+            
             try:
-                await status_msg.edit_text(answer_text, parse_mode="HTML")
+                await status_msg.edit_text(safe_html, parse_mode="HTML")
             except Exception:
                 try:
                     await status_msg.edit_text(answer_text, parse_mode=None)

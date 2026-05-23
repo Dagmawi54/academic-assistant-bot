@@ -11,7 +11,7 @@ from app.admin.states import SetupGroupStates, AddCourseStates, SemesterStates
 from app.database import crud
 from app.database.models import Group, Course, Topic, User
 from app.logging import get_logger
-from app.utils.text import escape_md
+import html
 
 logger = get_logger("admin_handler")
 
@@ -32,7 +32,7 @@ async def start_setup_group(
     await callback.message.edit_text(
         "📋 <b>Group Setup</b>\n\n"
         "First, forward any message from the group you want to set up, "
-        "or send the group chat ID\.",
+        "or send the group chat ID.",
     )
     await callback.answer()
 
@@ -58,7 +58,7 @@ async def setup_receive_chat_id(message: types.Message, state: FSMContext) -> No
         data = await state.get_data()
         if "chat_id" not in data:
             await message.answer(
-                "Please forward a message from the target group or send the chat ID first\."
+                "Please forward a message from the target group or send the chat ID first."
             )
             return
         await state.update_data(department=message.text)
@@ -81,7 +81,7 @@ async def setup_receive_dept_cb(callback: types.CallbackQuery, state: FSMContext
         await state.update_data(department=dept)
         await state.set_state(SetupGroupStates.waiting_year)
         await callback.message.edit_text(
-            f"Department <b>{escape_md(dept)}</b> selected\.\n\n📅 Select the academic year:", 
+            f"Department <b>{html.escape(dept)}</b> selected.\n\n📅 Select the academic year:", 
             reply_markup=menus.year_select()
         )
     await callback.answer()
@@ -94,7 +94,7 @@ async def setup_receive_year(callback: types.CallbackQuery, state: FSMContext) -
     await state.update_data(year=year)
     await state.set_state(SetupGroupStates.waiting_section)
     await callback.message.edit_text(
-        f"Year <b>{year}</b> selected\.\n\nNow enter the <b>section</b> \\(A, B, 1, 2, etc\.\\):"
+        f"Year <b>{year}</b> selected.\n\nNow enter the <b>section</b> (A, B, 1, 2, etc.):"
     )
     await callback.answer()
 
@@ -106,7 +106,7 @@ async def setup_receive_section(message: types.Message, state: FSMContext) -> No
     await state.update_data(section=section)
     await state.set_state(SetupGroupStates.waiting_semester)
     await message.answer(
-        f"Section <b>{escape_md(section)}</b> set\.\n\nSelect the current semester:",
+        f"Section <b>{html.escape(section)}</b> set.\n\nSelect the current semester:",
         reply_markup=menus.semester_select(),
     )
 
@@ -169,12 +169,12 @@ async def setup_receive_semester(
 
     await state.clear()
     await callback.message.edit_text(
-        f"✅ <b>Group configured\!</b>\n\n"
-        f"<code>Department</code> {escape_md(department)}\n"
+        f"✅ <b>Group configured!</b>\n\n"
+        f"<code>Department</code> {html.escape(department)}\n"
         f"<code>Year</code> {year}\n"
-        f"<code>Section</code> {escape_md(section)}\n"
+        f"<code>Section</code> {html.escape(section)}\n"
         f"<code>Semester</code> {semester}\n\n"
-        f"Next, add courses and link topics\.",
+        f"Next, add courses and link topics.",
         reply_markup=menus.back_button(),
     )
     await callback.answer()
@@ -194,7 +194,7 @@ async def start_add_course(
     admin_groups = [u.group_id for u in users if u.role in {"owner", "dept_admin", "section_admin"}]
 
     if not admin_groups:
-        await callback.message.edit_text("⚠️ No groups found\.", reply_markup=menus.back_button())
+        await callback.message.edit_text("⚠️ No groups found.", reply_markup=menus.back_button())
         await callback.answer()
         return
 
@@ -257,15 +257,15 @@ async def course_name_received(
 
         await state.set_state(AddCourseStates.waiting_course_name)
         await message.answer(
-            f"✅ Course <b>{escape_md(course_name)}</b> created\!\n"
-            f"\\(No forum topics found to link\\)\n\n"
+            f"✅ Course <b>{html.escape(course_name)}</b> created!\n"
+            f"(No forum topics found to link)\n\n"
             f"📚 Enter another <b>course name</b> or press Cancel:",
             reply_markup=menus.cancel_only(),
         )
     else:
         await state.set_state(AddCourseStates.waiting_topic_select)
         await message.answer(
-            f"🔗 Link <b>{escape_md(course_name)}</b> to a forum topic:",
+            f"🔗 Link <b>{html.escape(course_name)}</b> to a forum topic:",
             reply_markup=menus.topic_select_with_skip(topics),
         )
 
@@ -300,7 +300,7 @@ async def course_topic_selected(
     # Offer to add another course
     await state.set_state(AddCourseStates.waiting_course_name)
     await callback.message.edit_text(
-        f"✅ Course <b>{escape_md(data['course_name'])}</b> created and linked\!\n\n"
+        f"✅ Course <b>{html.escape(data['course_name'])}</b> created and linked!\n\n"
         f"📚 Enter another <b>course name</b> or press Cancel:",
         reply_markup=menus.cancel_only(),
     )
@@ -332,7 +332,7 @@ async def course_skip_topic(
     # Offer to add another course
     await state.set_state(AddCourseStates.waiting_course_name)
     await callback.message.edit_text(
-        f"✅ Course <b>{escape_md(data['course_name'])}</b> created \\(no topic linked\\)\!\n\n"
+        f"✅ Course <b>{html.escape(data['course_name'])}</b> created (no topic linked)!\n\n"
         f"📚 Enter another <b>course name</b> or press Cancel:",
         reply_markup=menus.cancel_only(),
     )
@@ -344,7 +344,7 @@ async def cb_done_adding_courses(callback: types.CallbackQuery, state: FSMContex
     """End the add course loop gracefully."""
     await state.clear()
     await callback.message.edit_text(
-        "✅ Courses saved\. Use <code>/menu</code> to configure more\.",
+        "✅ Courses saved. Use <code>/menu</code> to configure more.",
         reply_markup=menus.back_button(),
     )
     await callback.answer()
@@ -371,7 +371,7 @@ async def semester_confirm_close(
     admin_groups = [u.group_id for u in users if u.role in {"owner", "dept_admin", "section_admin"}]
 
     if not admin_groups:
-        await callback.message.edit_text("⚠️ No groups found\.", reply_markup=menus.back_button())
+        await callback.message.edit_text("⚠️ No groups found.", reply_markup=menus.back_button())
         await callback.answer()
         return
 
@@ -382,7 +382,7 @@ async def semester_confirm_close(
 
     await callback.message.edit_text(
         f"⚠️ Close semester <b>{group.semester}</b> for "
-        f"<b>{escape_md(group.department or '')}</b> Y{group.year} S{escape_md(group.section or '')}\\?\n\n"
+        f"<b>{html.escape(group.department or '')}</b> Y{group.year} S{html.escape(group.section or '')}?\n\n"
         "This will:\n"
         "• Close all current course topics\n"
         "• Cancel pending reminders\n"
@@ -413,9 +413,9 @@ async def semester_do_close(
 
     await state.clear()
     await callback.message.edit_text(
-        "🔒 <b>Semester closed\!</b>\n\n"
-        "All topics closed, courses deactivated, reminders cancelled\.\n"
-        "Use the menu to set up a new semester\.",
+        "🔒 <b>Semester closed!</b>\n\n"
+        "All topics closed, courses deactivated, reminders cancelled.\n"
+        "Use the menu to set up a new semester.",
         reply_markup=menus.back_button(),
     )
     await callback.answer()
@@ -428,7 +428,7 @@ async def semester_do_close(
 async def placeholder_menu(callback: types.CallbackQuery) -> None:
     """Placeholder for features to be implemented."""
     await callback.message.edit_text(
-        "🚧 This feature is coming soon\!",
+        "🚧 This feature is coming soon!",
         reply_markup=menus.back_button(),
     )
     await callback.answer()
@@ -476,9 +476,9 @@ async def cb_menu_permissions(callback: types.CallbackQuery) -> None:
     text = (
         "👥 <b>Managing Permissions</b>\n\n"
         "To promote or demote a user, perform these steps inside the group:\n"
-        "1\. Go to the target group\.\n"
-        "2\. Reply to the user's message\.\n"
-        "3\. Type <code>/promote <role></code> or <code>/demote</code>\.\n\n"
+        "1. Go to the target group.\n"
+        "2. Reply to the user's message.\n"
+        "3. Type <code>/promote <role></code> or <code>/demote</code>.\n\n"
         "<b>Available Roles:</b>\n"
         "<code>dept_admin</code>, <code>section_admin</code>, <code>moderator</code>"
     )
@@ -576,7 +576,7 @@ async def cb_menu_metrics(callback: types.CallbackQuery) -> None:
     report = await tracker.get_report()
     lines = ["📊 *System Metrics*:"]
     for k, v in report.items():
-        lines.append(f"• {escape_md(k)}: {escape_md(str(v))}")
+        lines.append(f"• {html.escape(k)}: {html.escape(str(v))}")
     await callback.message.edit_text(
         "\n".join(lines), parse_mode="HTML", reply_markup=menus.back_button()
     )
@@ -858,7 +858,7 @@ async def cb_view_audit(callback: types.CallbackQuery, session: AsyncSession) ->
                 "No audit logs found.", reply_markup=menus.back_button()
             )
             return
-        lines = [f"📝 <b>Audit Logs for {escape_md(group.department or 'Group')}</b>"]
+        lines = [f"📝 <b>Audit Logs for {html.escape(group.department or 'Group')}</b>"]
         for log in logs:
             time_str = escape_md(log.timestamp.strftime("%Y-%m-%d %H:%M"))
             action = escape_md(log.action)
@@ -908,7 +908,7 @@ async def cb_set_safety(callback: types.CallbackQuery, session: AsyncSession) ->
 @router.callback_query(F.data == "menu:cmd_version")
 async def cb_menu_version(callback: types.CallbackQuery) -> None:
     text = (
-        "🚀 <b>Academic Assistant Bot v1\.1\.0</b>\n\n"
+        "🚀 <b>Academic Assistant Bot v1.1.0</b>\n\n"
         "<b>Recent Updates:</b>\n"
         "• OCR Image Extraction\n"
         "• Document Extraction \\(PDF/DOCX\\)\n"

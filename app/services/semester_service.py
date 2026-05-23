@@ -21,10 +21,24 @@ async def close_semester(session: AsyncSession, group_id: int) -> None:
     4. Keep group record (semester will be updated on activation)
     """
     # Close topics
+    from app.bot import bot
     topics = await crud.get_active_topics(session, group_id)
     for topic in topics:
         if topic.topic_type == "course":
             await crud.update_fields(session, Topic, topic.id, status="closed")
+            if topic.message_thread_id and topic.message_thread_id > 0:
+                try:
+                    await bot.edit_forum_topic(
+                        chat_id=topic.chat_id,
+                        message_thread_id=topic.message_thread_id,
+                        name=f"[CLOSED] {topic.topic_name}"
+                    )
+                    await bot.close_forum_topic(
+                        chat_id=topic.chat_id,
+                        message_thread_id=topic.message_thread_id
+                    )
+                except Exception as e:
+                    logger.warning("failed_closing_telegram_topic", error=str(e), topic_id=topic.id)
 
     # Deactivate courses
     courses = await crud.get_active_courses(session, group_id)

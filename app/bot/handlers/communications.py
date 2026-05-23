@@ -9,8 +9,7 @@ from app.admin.states import AnnouncementStates
 from app.database import crud
 from app.database.models import Group, Course, Topic
 from app.logging import get_logger
-from app.utils.text import escape_md
-
+import html
 logger = get_logger("communications_handler")
 router = Router(name="communications")
 
@@ -28,7 +27,7 @@ async def start_communication(callback: types.CallbackQuery, state: FSMContext, 
 
     if not managed_groups:
         await callback.message.edit_text(
-            "❌ You do not manage any registered groups\.",
+            "❌ You do not manage any registered groups.",
             reply_markup=menus.back_button()
         )
         await callback.answer()
@@ -67,7 +66,7 @@ async def _process_group_selection(callback: types.CallbackQuery, state: FSMCont
         general = await crud.get_general_topic(session, group_id)
         if not general:
             await callback.message.edit_text(
-                "❌ This group has no registered General topic\. Someone needs to send a message in General or type <code>/scan_topics</code> there first\.",
+                "❌ This group has no registered General topic. Someone needs to send a message in General or type <code>/scan_topics</code> there first.",
                 reply_markup=menus.cancel_only(),
                 parse_mode="HTML"
             )
@@ -77,8 +76,8 @@ async def _process_group_selection(callback: types.CallbackQuery, state: FSMCont
         await state.update_data(topic_id=general.id)
         await state.set_state(AnnouncementStates.waiting_content)
         await callback.message.edit_text(
-            f"📢 <b>Broadcasting to {escape_md(group.department)}</b> \\(General\\)\n\n"
-            "Send the message you want to broadcast \\(text, photo, document, etc\.\\):\n"
+            f"📢 <b>Broadcasting to {html.escape(group.department)}</b> (General)\n\n"
+            "Send the message you want to broadcast (text, photo, document, etc.):\n"
             "_(Type or forward a message here)_",
             reply_markup=menus.cancel_only(),
             parse_mode="HTML"
@@ -90,7 +89,7 @@ async def _process_group_selection(callback: types.CallbackQuery, state: FSMCont
         courses = await crud.get_active_courses(session, group_id)
         if not courses:
             await callback.message.edit_text(
-                "❌ No active courses found in this group\.",
+                "❌ No active courses found in this group.",
                 reply_markup=menus.cancel_only(),
                 parse_mode="HTML"
             )
@@ -99,7 +98,7 @@ async def _process_group_selection(callback: types.CallbackQuery, state: FSMCont
 
         await state.set_state(AnnouncementStates.waiting_destination)
         await callback.message.edit_text(
-            f"🎯 <b>Targeted Push in {escape_md(group.department)}</b>\n\n"
+            f"🎯 <b>Targeted Push in {html.escape(group.department)}</b>\n\n"
             "Select the course to send the message to:",
             reply_markup=menus.course_select(courses),
             parse_mode="HTML"
@@ -114,7 +113,7 @@ async def cb_select_course(callback: types.CallbackQuery, state: FSMContext, ses
     
     if not course.forum_topic_id:
         await callback.message.edit_text(
-            f"❌ The course <b>{escape_md(course.course_name)}</b> is not linked to any forum topic\.",
+            f"❌ The course <b>{html.escape(course.course_name)}</b> is not linked to any forum topic.",
             reply_markup=menus.cancel_only(),
             parse_mode="HTML"
         )
@@ -124,8 +123,8 @@ async def cb_select_course(callback: types.CallbackQuery, state: FSMContext, ses
     await state.update_data(topic_id=course.forum_topic_id)
     await state.set_state(AnnouncementStates.waiting_content)
     await callback.message.edit_text(
-        f"🎯 <b>Targeting: {escape_md(course.course_name)}</b>\n\n"
-        "Send the message you want to push \\(text, photo, document, etc\.\\):\n"
+        f"🎯 <b>Targeting: {html.escape(course.course_name)}</b>\n\n"
+        "Send the message you want to push (text, photo, document, etc.):\n"
         "_(Type or forward a message here)_",
         reply_markup=menus.cancel_only(),
         parse_mode="HTML"
@@ -147,7 +146,7 @@ async def receive_content(message: types.Message, state: FSMContext) -> None:
     action = "Broadcast" if target_type == "broadcast" else "Push"
     
     await message.answer(
-        f"✅ Message received\! Review it above\.\n\n"
+        f"✅ Message received! Review it above.\n\n"
         f"Are you sure you want to {action.lower()} this message?",
         reply_markup=menus.confirm_action("send_push"),
         parse_mode="HTML"
@@ -165,7 +164,7 @@ async def confirm_send_push(callback: types.CallbackQuery, state: FSMContext, se
     
     if not topic:
         await callback.message.edit_text(
-            "❌ Error: Topic not found in database\.",
+            "❌ Error: Topic not found in database.",
             reply_markup=menus.back_button(),
             parse_mode="HTML"
         )
@@ -197,14 +196,14 @@ async def confirm_send_push(callback: types.CallbackQuery, state: FSMContext, se
         
         await state.clear()
         await callback.message.edit_text(
-            "✅ <b>Message successfully sent\!</b>",
+            "✅ <b>Message successfully sent!</b>",
             reply_markup=menus.back_button(),
             parse_mode="HTML"
         )
     except Exception as e:
         logger.error("push_failed", error=str(e), chat_id=topic.chat_id, thread_id=topic.message_thread_id)
         await callback.message.edit_text(
-            f"❌ <b>Failed to send message:</b>\n<code>{escape_md(str(e)[:150])}</code>\n\nEnsure I have send message permissions\.",
+            f"❌ <b>Failed to send message:</b>\n<code>{html.escape(str(e)[:150])}</code>\n\nEnsure I have send message permissions.",
             reply_markup=menus.back_button(),
             parse_mode="HTML"
         )

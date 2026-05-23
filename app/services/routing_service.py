@@ -94,6 +94,7 @@ async def process_group_message(
             course.id if course else None,
             classification.message_type.lower(),
             classification.deadline,
+            title=classification.title,
         )
         if duplicate:
             await tracker.record_duplicate_check(suppressed=True)

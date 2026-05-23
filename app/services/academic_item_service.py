@@ -16,6 +16,7 @@ async def is_semantic_duplicate(
     course_id: int | None,
     item_type: str,
     deadline: str | None,
+    title: str | None = None,
 ) -> AcademicItem | None:
     """Check if an exact or very similar academic item already exists.
 
@@ -36,11 +37,19 @@ async def is_semantic_duplicate(
     result = await session.execute(stmt)
     active_items = result.scalars().all()
 
+    import difflib
+
     for existing in active_items:
         if existing.deadline:
-            # Check if deadline is within 24 hours
+            # Check if deadline is within 48 hours
             diff = abs(existing.deadline - deadline)
-            if diff <= timedelta(hours=24):
+            if diff <= timedelta(hours=48):
+                # Also verify title similarity (if it's a completely different assignment, don't drop it!)
+                if title and existing.title:
+                    similarity = difflib.SequenceMatcher(None, title.lower(), existing.title.lower()).ratio()
+                    if similarity < 0.5:
+                        continue  # Titles are too different, probably distinct assignments
+                
                 logger.info(
                     "duplicate_item_detected",
                     new_item_type=item_type,
