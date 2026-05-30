@@ -97,6 +97,17 @@ async def process_group_message(
         deadline=str(classification.deadline) if classification.deadline else None,
     )
 
+    # Structured trace for observability
+    logger.info(
+        "GROUP_ROUTE",
+        trace_id=trace_id,
+        confidence=classification.confidence,
+        decision=classification.message_type,
+        course=classification.course_hint,
+        has_deadline=bool(classification.deadline),
+        has_room=bool(classification.room),
+    )
+
     # Skip non-academic messages (DISCUSSION or UNKNOWN)
     if classification.message_type in ("DISCUSSION", "UNKNOWN"):
         if len(text.split()) < 3:

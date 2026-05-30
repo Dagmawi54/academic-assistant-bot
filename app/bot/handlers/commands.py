@@ -275,9 +275,13 @@ async def cb_cancel(callback: types.CallbackQuery, state: FSMContext) -> None:
 @router.message(Command("image_scan"), StateFilter(any_state))
 async def cmd_ask_unified(message: types.Message, state: FSMContext, bot: Bot) -> None:
     """Unified handler for all /ask and AI proxy inputs."""
+    from app.logging import get_logger
+    logger = get_logger("cmd_ask_unified")
     await state.clear()
     
     intent = await detect_intent(message, bot)
+    trace_id = getattr(message, "_trace_id", None) or "no-trace"
+    logger.info("ASK_ENTRY", trace_id=trace_id, intent_type=intent.type, has_payload=bool(intent.payload), user_id=message.from_user.id if message.from_user else 0)
 
     if intent.metadata.get("error"):
         await message.answer(f"Error: {intent.metadata['error']}", parse_mode=None)

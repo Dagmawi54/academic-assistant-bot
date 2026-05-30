@@ -49,22 +49,17 @@ ASSIGNMENT_KEYWORDS = {
 QUIZ_KEYWORDS = {
     "quiz",
     "test",
-    "mid",
-    "assignment",
-    "exam"
+    "mid"
 }
 
 EXAM_KEYWORDS = {
     "exam",
     "fetena",
     "feten",
-    "test",
-    "mid",
     "midterm",
     "mid-term",
     "final",
     "final exam",
-    "quiz",
     "assessment",
     "examination",
     "mekera",
