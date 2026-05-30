@@ -32,10 +32,12 @@ async def process_group_message(
     text: str,
     user_id: int | None,
     message_id: int,
+    trace_id: str | None = None,
 ) -> None:
     """Full message processing pipeline: classify → extract → route → notify."""
     logger.info(
-        "academic_intake_received",
+        "ROUTE_ENTRY",
+        trace_id=trace_id,
         chat_id=chat_id,
         thread_id=thread_id,
         user_id=user_id,
@@ -56,6 +58,7 @@ async def process_group_message(
             group_id=group.id,
         )
     if not group:
+        logger.info("ROUTE_EXIT", trace_id=trace_id, handler_name="process_group_message")
         return  # Unregistered group — ignore
 
     topic_context = await resolve_topic_context(
@@ -99,6 +102,7 @@ async def process_group_message(
         # If the rule-based engine is reasonably sure it's just chat,
         # or if the message is very short, do NOT call the expensive AI.
         if classification.confidence >= 0.5 or len(text.split()) < 3:
+            logger.info("ROUTE_EXIT", trace_id=trace_id, handler_name="process_group_message")
             return  # Clearly not academic or too short to be meaningful
 
         # Only trial AI for high-importance messages that might have been missed
@@ -111,6 +115,7 @@ async def process_group_message(
         ):
             classification = _merge_ai_result(classification, ai_result)
         else:
+            logger.info("ROUTE_EXIT", trace_id=trace_id, handler_name="process_group_message")
             return
 
     # 3. If rule-based confidence is low, augment with AI
@@ -173,6 +178,7 @@ async def process_group_message(
                 raw_text=text
             )
             await crud.create(session, duplicate_log)
+            logger.info("ROUTE_EXIT", trace_id=trace_id, handler_name="process_group_message")
             return
         logger.info("academic_duplicate_check_clear", source_message_id=message_id)
 
@@ -306,7 +312,9 @@ async def process_group_message(
         logger.info("academic_event_emitted", item_id=item.id, event_name=event)
         await emit(event, item_id=item.id, reminders_already_created=True)
     logger.info(
-        "academic_pipeline_finished",
+        "ROUTE_EXIT",
+        trace_id=trace_id,
+        handler_name="process_group_message",
         chat_id=chat_id,
         thread_id=thread_id,
         message_id=message_id,

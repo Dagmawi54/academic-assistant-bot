@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.admin import menus
 from app.admin.permissions import is_admin_in_any_group
 from app.database import crud
-from app.utils.text import sanitize_telegram_html
+from app.utils.text import ResponseFormatter
 
 import html
 
@@ -290,6 +290,45 @@ async def cmd_ask(message: types.Message, state: FSMContext, bot: Bot) -> None:
     await _process_ask(message, query, file_context=reply_context)
 
 
+@router.message(Command("image_scan"), StateFilter(any_state), F.photo != None)
+@router.message(Command("ask"), StateFilter(any_state), F.photo != None)
+async def cmd_image_scan(message: types.Message, state: FSMContext, bot: Bot) -> None:
+    """Analyze attached photos via OCR and ask the AI."""
+    await state.clear()
+    caption = message.caption or ""
+    args = caption.split(maxsplit=1)
+    query = args[1].strip() if len(args) >= 2 else "Analyze this image and explain its academic context."
+
+    if not message.photo:
+        await message.answer("Please attach an image.", parse_mode=None)
+        return
+
+    status_msg = await message.answer("🖼 Reading image...", parse_mode=None)
+    try:
+        photo = message.photo[-1]
+        downloaded = await bot.download(photo)
+        image_bytes = downloaded.read()
+        
+        from app.ocr.engine import extract_text_from_image
+        extracted = await extract_text_from_image(image_bytes)
+
+        if not extracted or not extracted.strip():
+            await status_msg.edit_text("Could not extract any text from this image.", parse_mode=None)
+            return
+
+        if len(extracted) > 8000:
+            extracted = extracted[:8000] + "\n\n... (content truncated)"
+            
+        await status_msg.edit_text("⏳ Analyzing image...", parse_mode=None)
+        file_context = f"--- IMAGE OCR ---\n{extracted}\n--- END IMAGE OCR ---"
+        await _process_ask(message, query, file_context=file_context, status_msg=status_msg)
+    except Exception as e:
+        try:
+            await status_msg.edit_text(f"Error reading image: {str(e)[:200]}", parse_mode=None)
+        except Exception:
+            pass
+
+
 @router.message(Command("ask"), StateFilter(any_state), F.document != None)
 async def cmd_ask_with_file(message: types.Message, state: FSMContext, bot: Bot) -> None:
     """Ask the AI a question about an attached document."""
@@ -379,23 +418,28 @@ async def _process_ask(
     memory_key = _memory_key(message)
     prior_turns = list(_conversation_memory[memory_key])
 
-    try:
-        sys_prompt = (
-            "You are a concise, helpful academic assistant for Telegram. Be context-aware, friendly, "
-            "and lightly humorous when it fits, but do not ramble. "
-            "IMPORTANT TELEGRAM HTML FORMATTING RULES:\n"
-            "1. NEVER use Markdown. Only use HTML: <b>bold</b>, <i>italic</i>, <code>code</code>.\n"
-            "2. For multi-line code, use <pre><code class=\"language-python\">...</code></pre> when the language is clear.\n"
-            "3. Keep responses clean, well-spaced, and scannable.\n"
-            "4. Do not expose raw HTML tags to the user.\n"
-            "5. Prefer direct answers, then a short example if useful.\n"
-            "6. Use <blockquote> for the one or two key takeaways when it helps.\n"
-            "7. Avoid generic openings like 'Based on the provided information' or 'I can assist you with'.\n"
-            "8. STRICTLY PROHIBITED: giant walls of text, excessive emojis, and generic AI introductions."
-        )
-        if file_context:
-            sys_prompt += " If a document is provided, thoroughly analyze its contents and draw heavily from it."
+    # Fix 3: Dynamic personality Injection
+    base_system_prompt = (
+        "Respond with structured clarity.\n"
+        "Use sections and bullet points when needed.\n"
+        "Do not produce unstructured long paragraphs.\n"
+        "Do not reduce necessary detail.\n"
+        "Avoid repetition and unnecessary verbosity.\n"
+        "IMPORTANT RULES:\n"
+        "1. NEVER use Markdown. Only use HTML: <b>bold</b>, <i>italic</i>, <code>code</code>.\n"
+        "2. For multi-line code, use <pre><code class=\"language-python\">...</code></pre> when the language is clear.\n"
+        "3. Do not expose raw HTML tags to the user.\n"
+        "4. STRICTLY PROHIBITED: giant walls of text, excessive emojis, and generic AI introductions."
+    )
+    
+    personality_profile = getattr(message.bot, "personality_profile", "You are a helpful, professional academic assistant.")
+    
+    sys_prompt = f"{personality_profile}\n\n{base_system_prompt}"
+    
+    if file_context:
+        sys_prompt += "\nIf a document is provided, thoroughly analyze its contents and draw heavily from it."
 
+    try:
         messages = [{"role": "system", "content": sys_prompt}]
         messages.extend(prior_turns)
         messages.append({"role": "user", "content": user_content})
@@ -406,7 +450,7 @@ async def _process_ask(
             if len(answer_text) > 4000:
                 answer_text = answer_text[:4000] + "\n\n... (truncated)"
 
-            safe_html = sanitize_telegram_html(answer_text)
+            safe_html = ResponseFormatter.normalize(answer_text)
             try:
                 await status_msg.edit_text(safe_html, parse_mode="HTML")
                 _remember_turn(memory_key, user_content, safe_html)

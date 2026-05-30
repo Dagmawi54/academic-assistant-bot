@@ -120,6 +120,37 @@ def sanitize_telegram_html(text: str) -> str:
 
 
 
+class ResponseFormatter:
+    @staticmethod
+    def normalize(text: str) -> str:
+        """
+        Normalizes outputs before sending to Telegram UI.
+        - Strips DEBUG/TRACE leaks.
+        - Clamps excessive newlines to max 2.
+        - Prevents raw stack dumps.
+        - Converts unsafe markdown (**, __) to HTML safe tags if requested, then uses sanitize.
+        """
+        # Collapse excessive newlines
+        text = re.sub(r'\n{3,}', '\n\n', text)
+        
+        # Remove debug leaks
+        lines = text.split("\n")
+        safe_lines = []
+        for line in lines:
+            trimmed = line.strip()
+            if trimmed.startswith("DEBUG:") or trimmed.startswith("TRACE:"):
+                continue
+            if "Traceback (most recent call last):" in trimmed:
+                break
+            safe_lines.append(line)
+        text = "\n".join(safe_lines)
+
+        # Convert simple markdown to HTML tags if models slip up
+        text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
+        text = re.sub(r'__(.+?)__', r'<i>\1</i>', text)
+        
+        return sanitize_telegram_html(text)
+
 def clean_text(text: str) -> str:
     """Full text cleanup pipeline: whitespace + keyword normalization."""
     text = normalize_whitespace(text)

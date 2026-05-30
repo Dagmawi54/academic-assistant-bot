@@ -24,6 +24,10 @@ class LoggingMiddleware(BaseMiddleware):
         event: TelegramObject,
         data: Dict[str, Any],
     ) -> Any:
+        import uuid
+        trace_id = str(uuid.uuid4())
+        data["trace_id"] = trace_id
+
         if isinstance(event, Update):
             update_type = event.event_type
             user_id = None
@@ -43,6 +47,7 @@ class LoggingMiddleware(BaseMiddleware):
 
             logger.info(
                 "update_received",
+                trace_id=trace_id,
                 update_id=event.update_id,
                 update_type=update_type,
                 user_id=user_id,
