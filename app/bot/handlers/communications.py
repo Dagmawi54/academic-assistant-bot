@@ -1,16 +1,18 @@
-"""Communications DM handler — FSM-driven broadcasting and targeted pushes."""
+"""Communications DM handler: announcements, direct broadcasts, targeted pushes, coverage."""
 
-from aiogram import Router, types, F, Bot
+from __future__ import annotations
+
+import html
+
+from aiogram import Bot, F, Router, types
 from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admin import menus
 from app.admin.states import AnnouncementStates, ExamCoverageStates
 from app.database import crud
-from app.database.models import Group, Course, Topic
+from app.database.models import Course, Group, Topic
 from app.logging import get_logger
-import html
-
 from app.services.announcement_formatter import format_announcement_html
 from app.services.exam_coverage_service import create_exam_coverage_entry
 
@@ -18,129 +20,186 @@ logger = get_logger("communications_handler")
 router = Router(name="communications")
 
 
-@router.callback_query(F.data.in_({"menu:announcements", "menu:targeted_push"}))
+@router.callback_query(F.data.in_({"menu:announcements", "menu:broadcast", "menu:targeted_push"}))
 async def start_communication(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
-    """Start the broadcast or targeted push flow."""
-    target_type = "broadcast" if callback.data == "menu:announcements" else "targeted"
-    
+    """Start announcement, raw broadcast, or targeted push flow."""
+    if callback.data == "menu:announcements":
+        target_type = "announcement"
+    elif callback.data == "menu:broadcast":
+        target_type = "broadcast"
+    else:
+        target_type = "targeted"
+
     await state.clear()
     await state.update_data(target_type=target_type)
 
-    user_id = callback.from_user.id
-    managed_groups = await crud.get_managed_groups(session, user_id)
-
+    managed_groups = await crud.get_managed_groups(session, callback.from_user.id)
     if not managed_groups:
         await callback.message.edit_text(
-            "❌ You do not manage any registered groups.",
+            "You do not manage any registered groups.",
             reply_markup=menus.back_button(),
             parse_mode="HTML",
         )
         await callback.answer()
         return
 
-    # If only 1 group, skip group selection
     if len(managed_groups) == 1:
-        group = managed_groups[0]
-        await _process_group_selection(callback, state, session, group.id)
-    else:
-        # Prompt for group selection
-        await state.set_state(AnnouncementStates.waiting_group_select)
-        await callback.message.edit_text(
-            "🏢 <b>Select the group to send message to:</b>",
-            reply_markup=menus.group_select(managed_groups),
-            parse_mode="HTML"
-        )
-        await callback.answer()
+        await _process_group_selection(callback, state, session, managed_groups[0].id)
+        return
+
+    await state.set_state(AnnouncementStates.waiting_group_select)
+    await callback.message.edit_text(
+        "<b>Select the group:</b>",
+        reply_markup=menus.group_select(managed_groups),
+        parse_mode="HTML",
+    )
+    await callback.answer()
 
 
 @router.callback_query(AnnouncementStates.waiting_group_select, F.data.startswith("group:"))
 async def cb_select_group(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
-    group_id = int(callback.data.split(":")[1])
-    await _process_group_selection(callback, state, session, group_id)
+    await _process_group_selection(callback, state, session, int(callback.data.split(":")[1]))
 
 
-async def _process_group_selection(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession, group_id: int) -> None:
+async def _process_group_selection(
+    callback: types.CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+    group_id: int,
+) -> None:
     await state.update_data(group_id=group_id)
     data = await state.get_data()
     target_type = data["target_type"]
-
     group = await crud.get_by_id(session, Group, group_id)
 
-    if target_type == "broadcast":
-        # Broadcast -> send to General topic
-        general = await crud.get_general_topic(session, group_id)
-        if not general:
-            await callback.message.edit_text(
-                "❌ This group has no registered General topic. Someone needs to send a message in General or type <code>/scan_topics</code> there first.",
-                reply_markup=menus.cancel_button(),
-                parse_mode="HTML"
-            )
-            await callback.answer()
-            return
-            
-        await state.update_data(topic_id=general.id)
-        await state.set_state(AnnouncementStates.waiting_content)
-        await callback.message.edit_text(
-            f"📢 <b>Broadcasting to {html.escape(group.department)}</b> (General)\n\n"
-            "Send the message you want to broadcast (text, photo, document, etc.):\n"
-            "_(Type or forward a message here)_",
-            reply_markup=menus.cancel_button(),
-            parse_mode="HTML"
-        )
-        await callback.answer()
-
-    else:
-        # Targeted push -> select course
+    if target_type in {"announcement", "broadcast"}:
         courses = await crud.get_active_courses(session, group_id)
-        if not courses:
-            await callback.message.edit_text(
-                "❌ No active courses found in this group.",
-                reply_markup=menus.cancel_button(),
-                parse_mode="HTML"
-            )
-            await callback.answer()
-            return
-
+        await state.update_data(selected_course_ids=[], target_scope=None, target_topic_ids=[], target_names=[])
         await state.set_state(AnnouncementStates.waiting_destination)
+        label = "AI Announcement" if target_type == "announcement" else "Raw Broadcast"
         await callback.message.edit_text(
-            f"🎯 <b>Targeted Push in {html.escape(group.department)}</b>\n\n"
-            "Select the course to send the message to:",
-            reply_markup=menus.course_select(courses),
-            parse_mode="HTML"
+            f"<b>{html.escape(label)} Targets</b>\n\n"
+            "Select one or more course topics, choose General, or choose Global.",
+            reply_markup=menus.announcement_target_select(courses),
+            parse_mode="HTML",
         )
         await callback.answer()
+        return
+
+    courses = await crud.get_active_courses(session, group_id)
+    if not courses:
+        await callback.message.edit_text(
+            "No active courses found in this group.",
+            reply_markup=menus.cancel_button(),
+            parse_mode="HTML",
+        )
+        await callback.answer()
+        return
+
+    await state.set_state(AnnouncementStates.waiting_destination)
+    await callback.message.edit_text(
+        f"<b>Targeted Push in {html.escape(group.department if group else 'Group')}</b>\n\n"
+        "Select the course to send the message to:",
+        reply_markup=menus.course_select(courses),
+        parse_mode="HTML",
+    )
+    await callback.answer()
 
 
 @router.callback_query(AnnouncementStates.waiting_destination, F.data.startswith("course:"))
 async def cb_select_course(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
     course_id = int(callback.data.split(":")[1])
     course = await crud.get_by_id(session, Course, course_id)
-
     if not course or not course.topic_id:
         await callback.message.edit_text(
-            f"❌ The course <b>{html.escape(course.course_name if course else 'Unknown')}</b> is not linked to any forum topic.",
+            f"The course <b>{html.escape(course.course_name if course else 'Unknown')}</b> is not linked to a forum topic.",
             reply_markup=menus.cancel_button(),
-            parse_mode="HTML"
+            parse_mode="HTML",
         )
         await callback.answer()
         return
 
-    await state.update_data(topic_id=course.topic_id)
+    await state.update_data(topic_id=course.topic_id, target_names=[course.course_name])
     await state.set_state(AnnouncementStates.waiting_content)
     await callback.message.edit_text(
-        f"🎯 <b>Targeting: {html.escape(course.course_name)}</b>\n\n"
-        "Send the message you want to push (text, photo, document, etc.):\n"
-        "_(Type or forward a message here)_",
+        f"<b>Targeting: {html.escape(course.course_name)}</b>\n\n"
+        "Send the message you want to push.",
         reply_markup=menus.cancel_button(),
-        parse_mode="HTML"
+        parse_mode="HTML",
     )
     await callback.answer()
 
 
+@router.callback_query(AnnouncementStates.waiting_destination, F.data.startswith("ann:toggle_course:"))
+async def cb_toggle_announcement_course(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
+    course_id = int(callback.data.rsplit(":", 1)[1])
+    data = await state.get_data()
+    selected = set(data.get("selected_course_ids") or [])
+    if course_id in selected:
+        selected.remove(course_id)
+    else:
+        selected.add(course_id)
+
+    courses = await crud.get_active_courses(session, data["group_id"])
+    selected_names = [course.course_name for course in courses if course.id in selected]
+    await state.update_data(selected_course_ids=list(selected), target_scope=None, target_topic_ids=[], target_names=selected_names)
+    await callback.message.edit_text(
+        "<b>AI Announcement Targets</b>\n\nSelected course topics will receive one message each.",
+        reply_markup=menus.announcement_target_select(courses, selected_course_ids=selected),
+        parse_mode="HTML",
+    )
+    await callback.answer("Target updated.")
+
+
+@router.callback_query(AnnouncementStates.waiting_destination, F.data.in_({"ann:target_general", "ann:target_global"}))
+async def cb_set_announcement_scope(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
+    data = await state.get_data()
+    scope = "general" if callback.data == "ann:target_general" else "global"
+    courses = await crud.get_active_courses(session, data["group_id"])
+    await state.update_data(
+        target_scope=scope,
+        selected_course_ids=[],
+        target_topic_ids=[],
+        target_names=["General"] if scope == "general" else ["Global: all configured topics"],
+    )
+    await callback.message.edit_text(
+        f"<b>AI Announcement Targets</b>\n\nSelected scope: <b>{scope.title()}</b>",
+        reply_markup=menus.announcement_target_select(courses),
+        parse_mode="HTML",
+    )
+    await callback.answer(f"{scope.title()} selected.")
+
+
+@router.callback_query(AnnouncementStates.waiting_destination, F.data == "ann:targets_done")
+async def cb_announcement_targets_done(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
+    data = await state.get_data()
+    targets = await _resolve_announcement_targets(session, data)
+    if not targets:
+        await callback.answer("Select at least one valid target.", show_alert=True)
+        return
+
+    await state.update_data(
+        target_topic_ids=[topic.id for topic in targets],
+        target_names=[topic.topic_name for topic in targets],
+    )
+    await state.set_state(AnnouncementStates.waiting_content)
+    target_lines = "\n".join(f"• {html.escape(topic.topic_name)}" for topic in targets)
+    prompt = (
+        "Send the AI announcement text or media."
+        if data.get("target_type") == "announcement"
+        else "Send the raw broadcast text or media."
+    )
+    await callback.message.edit_text(
+        f"<b>Targets</b>\n{target_lines}\n\n{prompt}",
+        reply_markup=menus.cancel_button(),
+        parse_mode="HTML",
+    )
+    await callback.answer("Targets ready.")
+
+
 @router.message(AnnouncementStates.waiting_content, F.chat.type == "private")
 async def receive_content(message: types.Message, state: FSMContext) -> None:
-    """Store the message ID that the user wants to broadcast."""
-    # We store the message object ID to copy it later
+    """Store the message ID to copy/send later and show a target preview."""
     await state.update_data(
         message_id=message.message_id,
         source_chat_id=message.chat.id,
@@ -155,89 +214,119 @@ async def receive_content(message: types.Message, state: FSMContext) -> None:
             or message.sticker
         ),
     )
-    
     data = await state.get_data()
     target_type = data["target_type"]
+    action = "AI announcement" if target_type == "announcement" else ("raw broadcast" if target_type == "broadcast" else "push")
+    target_names = data.get("target_names") or ["Selected topic"]
+    preview = "\n".join(f"• {html.escape(name)}" for name in target_names)
 
     await state.set_state(AnnouncementStates.confirm)
-    
-    action = "Broadcast" if target_type == "broadcast" else "Push"
-    
     await message.answer(
-        f"✅ Message received. Review it above.\n\n"
-        f"Are you sure you want to {action.lower()} this message?",
+        f"✅ Message received.\n\n<b>Targets</b>\n{preview}\n\n"
+        f"Confirm {action} send?",
         reply_markup=menus.confirm_action("send_push"),
-        parse_mode="HTML"
+        parse_mode="HTML",
     )
+
 
 @router.callback_query(AnnouncementStates.confirm, F.data == "confirm:send_push")
 async def confirm_send_push(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession, bot: Bot) -> None:
-    """Execute the message copy to the target topic."""
+    """Send/copy the message to all resolved target topics."""
     data = await state.get_data()
-    topic_id = data["topic_id"]
-    msg_id = data["message_id"]
-    user_id = callback.from_user.id
-    source_chat_id = data.get("source_chat_id", callback.message.chat.id)
-    content_text = data.get("content_text", "")
-    has_media = data.get("has_media", False)
-    
-    topic = await crud.get_by_id(session, Topic, topic_id)
-    
-    if not topic:
+    topics = await _resolve_announcement_targets(session, data)
+    if not topics:
         await callback.message.edit_text(
-            "❌ Error: Topic not found in database.",
+            "No valid target topics found.",
             reply_markup=menus.back_button(),
-            parse_mode="HTML"
+            parse_mode="HTML",
         )
         await callback.answer()
         return
 
-    # Use copy_message to support all types (text, photos, docs)
+    msg_id = data["message_id"]
+    source_chat_id = data.get("source_chat_id", callback.message.chat.id)
+    content_text = data.get("content_text", "")
+    has_media = data.get("has_media", False)
+    target_type = data.get("target_type")
+
     try:
-        if content_text and not has_media:
-            await bot.send_message(
-                chat_id=topic.chat_id,
-                text=format_announcement_html(content_text),
-                message_thread_id=topic.message_thread_id if topic.message_thread_id and topic.message_thread_id > 0 else None,
-                parse_mode="HTML",
-            )
-        else:
-            if topic.message_thread_id and topic.message_thread_id > 0:
-                await bot.copy_message(
+        for topic in topics:
+            thread_id = topic.message_thread_id if topic.message_thread_id and topic.message_thread_id > 0 else None
+            if content_text and not has_media:
+                text = format_announcement_html(content_text) if target_type == "announcement" else html.escape(content_text)
+                await bot.send_message(
                     chat_id=topic.chat_id,
-                    from_chat_id=source_chat_id,
-                    message_id=msg_id,
-                    message_thread_id=topic.message_thread_id
+                    text=text,
+                    message_thread_id=thread_id,
+                    parse_mode="HTML",
                 )
             else:
-                await bot.copy_message(
-                    chat_id=topic.chat_id,
-                    from_chat_id=source_chat_id,
-                    message_id=msg_id
-                )
-            
+                kwargs = {
+                    "chat_id": topic.chat_id,
+                    "from_chat_id": source_chat_id,
+                    "message_id": msg_id,
+                }
+                if thread_id:
+                    kwargs["message_thread_id"] = thread_id
+                await bot.copy_message(**kwargs)
+
         await crud.log_action(
             session,
-            action="communicate_push",
-            telegram_user_id=user_id,
-            details=f"Topic: {topic.topic_name} msg_id: {msg_id}"
+            action="announcement_sent" if target_type == "announcement" else ("broadcast_sent" if target_type == "broadcast" else "communicate_push"),
+            telegram_user_id=callback.from_user.id,
+            details=f"topics={','.join(str(topic.id) for topic in topics)} msg_id={msg_id}",
         )
-        
         await state.clear()
         await callback.message.edit_text(
-            "✅ <b>Message successfully sent!</b>",
+            f"✅ <b>Message successfully sent</b>\n\nTargets: <code>{len(topics)}</code>",
             reply_markup=menus.back_button(),
-            parse_mode="HTML"
+            parse_mode="HTML",
         )
-    except Exception as e:
-        logger.error("push_failed", error=str(e), chat_id=topic.chat_id, thread_id=topic.message_thread_id)
+        await callback.answer("Sent.")
+    except Exception as exc:
+        logger.error("push_failed", error=str(exc), target_topic_ids=[topic.id for topic in topics])
         await callback.message.edit_text(
-            f"❌ <b>Failed to send message:</b>\n<code>{html.escape(str(e)[:150])}</code>\n\nEnsure I have send message permissions.",
+            f"<b>Failed to send message:</b>\n<code>{html.escape(str(exc)[:150])}</code>",
             reply_markup=menus.back_button(),
-            parse_mode="HTML"
+            parse_mode="HTML",
         )
-    
-    await callback.answer()
+        await callback.answer("Send failed.", show_alert=True)
+
+
+async def _resolve_announcement_targets(session: AsyncSession, data: dict) -> list[Topic]:
+    """Resolve announcement/broadcast state into concrete Telegram topics."""
+    if data.get("target_type") == "targeted" and data.get("topic_id"):
+        topic = await crud.get_by_id(session, Topic, data["topic_id"])
+        return [topic] if topic else []
+
+    if data.get("target_topic_ids"):
+        topics = []
+        for topic_id in data["target_topic_ids"]:
+            topic = await crud.get_by_id(session, Topic, topic_id)
+            if topic and topic.status == "active":
+                topics.append(topic)
+        return topics
+
+    if data.get("selected_course_ids"):
+        topics = []
+        for course_id in data["selected_course_ids"]:
+            course = await crud.get_by_id(session, Course, course_id)
+            if course and course.topic_id:
+                topic = await crud.get_by_id(session, Topic, course.topic_id)
+                if topic and topic.status == "active":
+                    topics.append(topic)
+        return topics
+
+    group_id = data.get("group_id")
+    if data.get("target_scope") == "general":
+        general = await crud.get_general_topic(session, group_id)
+        return [general] if general else []
+
+    if data.get("target_scope") == "global":
+        topics = await crud.get_active_topics(session, group_id)
+        return [topic for topic in topics if topic.topic_type != "ignored"]
+
+    return []
 
 
 @router.callback_query(F.data == "menu:exam_coverage")
@@ -251,7 +340,7 @@ async def start_exam_coverage(
     managed_groups = await crud.get_managed_groups(session, callback.from_user.id)
     if not managed_groups:
         await callback.message.edit_text(
-            "❌ You do not manage any registered groups.",
+            "You do not manage any registered groups.",
             reply_markup=menus.back_button(),
             parse_mode="HTML",
         )
@@ -263,7 +352,7 @@ async def start_exam_coverage(
     else:
         await state.set_state(ExamCoverageStates.waiting_group_select)
         await callback.message.edit_text(
-            "📘 <b>Select the group for this exam coverage entry:</b>",
+            "<b>Select the group for this exam coverage entry:</b>",
             reply_markup=menus.group_select(managed_groups),
             parse_mode="HTML",
         )
@@ -288,7 +377,7 @@ async def _start_exam_coverage_for_group(
     courses = await crud.get_active_courses(session, group_id)
     if not courses:
         await callback.message.edit_text(
-            "❌ No active courses found in this group yet.",
+            "No active courses found in this group yet.",
             reply_markup=menus.back_button(),
             parse_mode="HTML",
         )
@@ -298,7 +387,7 @@ async def _start_exam_coverage_for_group(
     await state.update_data(group_id=group_id)
     await state.set_state(ExamCoverageStates.waiting_course)
     await callback.message.edit_text(
-        "📘 <b>Select the course for this coverage update:</b>",
+        "<b>Select the course for this coverage update:</b>",
         reply_markup=menus.course_select(courses),
         parse_mode="HTML",
     )
@@ -315,7 +404,7 @@ async def cb_exam_coverage_course(callback: types.CallbackQuery, state: FSMConte
     await state.update_data(course_id=course_id, course_name=course.course_name)
     await state.set_state(ExamCoverageStates.waiting_exam_type)
     await callback.message.edit_text(
-        f"📘 <b>{html.escape(course.course_name)}</b>\n\nSelect the exam type:",
+        f"<b>{html.escape(course.course_name)}</b>\n\nSelect the exam type:",
         reply_markup=menus.exam_type_select(),
         parse_mode="HTML",
     )
@@ -330,7 +419,7 @@ async def cb_exam_coverage_type(callback: types.CallbackQuery, state: FSMContext
     await state.update_data(exam_type=exam_type)
     await state.set_state(ExamCoverageStates.waiting_chapters)
     await callback.message.edit_text(
-        "📝 Send the coverage details.\n\nExamples:\n• covers chapter 1-4\n• excluding recursion",
+        "Send the coverage details.\n\nExamples:\n• covers chapter 1-4\n• excluding recursion",
         reply_markup=menus.cancel_button(),
         parse_mode="HTML",
     )
@@ -356,7 +445,7 @@ async def msg_exam_coverage_notes(message: types.Message, state: FSMContext, ses
     exam_type = data["exam_type"].replace("_", " ").title()
     coverage_text = data["coverage_text"]
     summary = (
-        f"📘 <b>{html.escape(course.course_name if course else 'Course')} {html.escape(exam_type)} Coverage</b>\n\n"
+        f"<b>{html.escape(course.course_name if course else 'Course')} {html.escape(exam_type)} Coverage</b>\n\n"
         f"{html.escape(coverage_text)}"
     )
     if notes:
@@ -364,11 +453,7 @@ async def msg_exam_coverage_notes(message: types.Message, state: FSMContext, ses
     summary += "\n\nConfirm posting this coverage update?"
     await state.update_data(notes=notes)
     await state.set_state(ExamCoverageStates.confirm_post)
-    await message.answer(
-        summary,
-        reply_markup=menus.confirm_action("exam_coverage_post"),
-        parse_mode="HTML",
-    )
+    await message.answer(summary, reply_markup=menus.confirm_action("exam_coverage_post"), parse_mode="HTML")
 
 
 @router.callback_query(ExamCoverageStates.confirm_post, F.data == "confirm:exam_coverage_post")

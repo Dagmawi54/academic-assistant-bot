@@ -67,3 +67,10 @@ class AnnouncementStates(StatesGroup):
     waiting_destination = State()  # General topic / specific course / all
     waiting_content = State()  # Enter announcement text
     confirm = State()
+
+
+class EventEditStates(StatesGroup):
+    """Dashboard edit flows for low-confidence items and coverage."""
+
+    waiting_item_edit = State()
+    waiting_coverage_edit = State()

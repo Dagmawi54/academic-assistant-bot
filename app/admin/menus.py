@@ -12,7 +12,7 @@ def main_menu() -> InlineKeyboardMarkup:
     buttons = [
         [InlineKeyboardButton(text="Courses", callback_data="menu:cat_courses")],
         [InlineKeyboardButton(text="Semester Management", callback_data="menu:semester")],
-        [InlineKeyboardButton(text="Broadcasting", callback_data="menu:announcements")],
+        [InlineKeyboardButton(text="Raw Broadcast", callback_data="menu:broadcast")],
         [InlineKeyboardButton(text="Communications", callback_data="menu:cat_communications")],
         [InlineKeyboardButton(text="Events", callback_data="menu:cat_events")],
         [InlineKeyboardButton(text="Administration", callback_data="menu:cat_administration")],
@@ -44,11 +44,17 @@ def cat_courses() -> InlineKeyboardMarkup:
 def cat_communications() -> InlineKeyboardMarkup:
     buttons = [
         [InlineKeyboardButton(text="Exam Coverage", callback_data="menu:exam_coverage")],
-        [InlineKeyboardButton(text="Announcements", callback_data="menu:announcements")],
+        [InlineKeyboardButton(text="AI Announcement", callback_data="menu:announcements")],
+        [InlineKeyboardButton(text="Raw Broadcast", callback_data="menu:broadcast")],
         [InlineKeyboardButton(text="Targeted Course Push", callback_data="menu:targeted_push")],
         [InlineKeyboardButton(text="Back", callback_data="menu:main")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def communications_menu() -> InlineKeyboardMarkup:
+    """Backward-compatible alias for the communications category menu."""
+    return cat_communications()
 
 
 def cat_administration() -> InlineKeyboardMarkup:
@@ -74,11 +80,15 @@ def cat_analytics() -> InlineKeyboardMarkup:
 
 def cat_events() -> InlineKeyboardMarkup:
     buttons = [
-        [InlineKeyboardButton(text="Upcoming Events", callback_data="menu:events_upcoming")],
-        [InlineKeyboardButton(text="Exam Coverages", callback_data="menu:events_coverage")],
-        [InlineKeyboardButton(text="Scheduled Reminders", callback_data="menu:events_reminders")],
+        [InlineKeyboardButton(text="📅 Upcoming Events", callback_data="menu:events_upcoming")],
+        [InlineKeyboardButton(text="📚 Exams", callback_data="menu:events_exams")],
+        [InlineKeyboardButton(text="📝 Assignments", callback_data="menu:events_assignments")],
+        [InlineKeyboardButton(text="❓ Quizzes", callback_data="menu:events_quizzes")],
+        [InlineKeyboardButton(text="⏰ Reminders", callback_data="menu:events_reminders")],
+        [InlineKeyboardButton(text="Recently Detected", callback_data="menu:events_recent")],
+        [InlineKeyboardButton(text="📖 Coverage Records", callback_data="menu:events_coverage")],
         [InlineKeyboardButton(text="Scheduler Jobs", callback_data="menu:events_scheduler")],
-        [InlineKeyboardButton(text="Low Confidence / Review", callback_data="menu:events_review")],
+        [InlineKeyboardButton(text="⚠️ Review Queue", callback_data="menu:events_review")],
         [InlineKeyboardButton(text="Suppressed Duplicates", callback_data="menu:events_duplicates")],
         [InlineKeyboardButton(text="Back", callback_data="menu:main")],
     ]
@@ -171,6 +181,30 @@ def course_select(courses: Sequence[Course]) -> InlineKeyboardMarkup:
         for course in courses
     ]
     buttons.append([InlineKeyboardButton(text="Cancel", callback_data="cancel")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def announcement_target_select(
+    courses: Sequence[Course],
+    *,
+    selected_course_ids: set[int] | None = None,
+) -> InlineKeyboardMarkup:
+    """Select one or more announcement targets."""
+    selected_course_ids = selected_course_ids or set()
+    buttons = []
+    for course in courses:
+        marker = "✓ " if course.id in selected_course_ids else ""
+        buttons.append(
+            [InlineKeyboardButton(text=f"{marker}{course.course_name}", callback_data=f"ann:toggle_course:{course.id}")]
+        )
+    buttons.extend(
+        [
+            [InlineKeyboardButton(text="General Topic Only", callback_data="ann:target_general")],
+            [InlineKeyboardButton(text="Global: All Configured Topics", callback_data="ann:target_global")],
+            [InlineKeyboardButton(text="Continue", callback_data="ann:targets_done")],
+            [InlineKeyboardButton(text="Cancel", callback_data="cancel")],
+        ]
+    )
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 

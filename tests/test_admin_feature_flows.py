@@ -139,6 +139,71 @@ async def test_manual_exam_coverage_creation_persists_item_and_posts(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_confirm_stitch_structures_existing_coverage(session):
+    from app.services.coverage_parser import render_coverage_summary
+    from app.services.exam_coverage_service import stitch_item_coverage
+
+    group = await crud.create(session, Group(chat_id=-100778, department="Math", active=True))
+    item = await crud.create(
+        session,
+        AcademicItem(
+            group_id=group.id,
+            item_type="exam_coverage",
+            title="Math Coverage",
+            raw_text="covers chapters 1-5 excluding recursion MCQ only",
+            coverage="covers chapters 1-5",
+            status="new",
+            confidence=1.0,
+        ),
+    )
+
+    stitched = await stitch_item_coverage(session, item.id)
+
+    assert stitched is not None
+    assert stitched.status == "active"
+    assert "included_topics" in stitched.coverage
+    assert "excluded_topics" in stitched.coverage
+    assert "recursion" in stitched.coverage
+    assert "chapters 1-5" in render_coverage_summary(stitched.coverage)
+
+
+@pytest.mark.asyncio
+async def test_announcement_target_resolution_scopes_topics(session):
+    from app.bot.handlers.communications import _resolve_announcement_targets
+
+    group = await crud.create(session, Group(chat_id=-100779, department="Science", active=True))
+    general = await crud.create(
+        session,
+        Topic(group_id=group.id, chat_id=group.chat_id, message_thread_id=1, topic_name="General", topic_type="general", status="active"),
+    )
+    math_topic = await crud.create(
+        session,
+        Topic(group_id=group.id, chat_id=group.chat_id, message_thread_id=2, topic_name="Mathematics", topic_type="course", status="active"),
+    )
+    physics_topic = await crud.create(
+        session,
+        Topic(group_id=group.id, chat_id=group.chat_id, message_thread_id=3, topic_name="Physics", topic_type="course", status="active"),
+    )
+    ignored = await crud.create(
+        session,
+        Topic(group_id=group.id, chat_id=group.chat_id, message_thread_id=4, topic_name="Old", topic_type="ignored", status="active"),
+    )
+    math = await crud.create(session, Course(group_id=group.id, course_name="Math", semester=1, topic_id=math_topic.id, active=True))
+    physics = await crud.create(session, Course(group_id=group.id, course_name="Physics", semester=1, topic_id=physics_topic.id, active=True))
+
+    single = await _resolve_announcement_targets(session, {"selected_course_ids": [math.id], "group_id": group.id})
+    multi = await _resolve_announcement_targets(session, {"selected_course_ids": [math.id, physics.id], "group_id": group.id})
+    general_only = await _resolve_announcement_targets(session, {"target_scope": "general", "group_id": group.id})
+    global_targets = await _resolve_announcement_targets(session, {"target_scope": "global", "group_id": group.id})
+
+    assert [topic.id for topic in single] == [math_topic.id]
+    assert {topic.id for topic in multi} == {math_topic.id, physics_topic.id}
+    assert [topic.id for topic in general_only] == [general.id]
+    assert {topic.id for topic in global_targets} == {general.id, math_topic.id, physics_topic.id}
+    assert ignored.id not in {topic.id for topic in global_targets}
+
+
+@pytest.mark.asyncio
 async def test_duplicate_details_render_single_record(session):
     from app.services.event_service import get_duplicate_detail
 
@@ -181,3 +246,21 @@ def test_announcement_formatter_highlights_urgency_and_dates():
     assert "<b>" in formatted
     assert "Friday" in formatted
     assert "assignment" in formatted.lower()
+
+
+@pytest.mark.asyncio
+async def test_ask_reply_document_text_extraction(monkeypatch):
+    from app.bot.handlers.commands import _extract_document_text
+
+    async def fake_pdf(data):
+        return f"pdf:{data.decode()}"
+
+    async def fake_docx(data):
+        return f"docx:{data.decode()}"
+
+    monkeypatch.setattr("app.files.parser.extract_text_from_pdf", fake_pdf)
+    monkeypatch.setattr("app.files.parser.extract_text_from_docx", fake_docx)
+
+    assert await _extract_document_text(b"hello", "txt") == "hello"
+    assert await _extract_document_text(b"slides", "pdf") == "pdf:slides"
+    assert await _extract_document_text(b"notes", "docx") == "docx:notes"

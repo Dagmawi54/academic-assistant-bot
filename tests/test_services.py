@@ -199,8 +199,8 @@ async def test_topic_context_exam_creates_item_and_ack(monkeypatch):
     assert reminders
     assert sent_messages
     assert sent_messages[0]["message_thread_id"] == 42
-    assert "Math" in sent_messages[0]["text"]
-    assert "Exam" in sent_messages[0]["text"]
+    assert "Exam added" in sent_messages[0]["text"]
+    assert "Confidence" not in sent_messages[0]["text"]
 
 
 @pytest.mark.asyncio
@@ -266,6 +266,73 @@ async def test_topic_context_assignment_creates_item_reminders_and_ack(monkeypat
     assert all(r.thread_id == 84 for r in reminders)
     assert sent_messages
     assert sent_messages[0]["message_thread_id"] == 84
-    assert "Data Structures" in sent_messages[0]["text"]
-    assert "Assignment" in sent_messages[0]["text"]
+    assert "Assignment deadline recorded" in sent_messages[0]["text"]
+    assert "Confidence" not in sent_messages[0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_exact_exam_on_tuesday_pipeline_logs_item_reminders_and_ack(monkeypatch):
+    """The live-critical short exam phrase should traverse the full Academic OS path."""
+    from app.services.routing_service import process_group_message
+    from tests.conftest import TestSessionFactory
+
+    sent_messages = []
+
+    async def fake_send_message(**kwargs):
+        sent_messages.append(kwargs)
+
+    monkeypatch.setattr("app.services.routing_service.bot.send_message", fake_send_message)
+
+    async def fake_ai_extraction(text):
+        return None
+
+    monkeypatch.setattr("app.services.routing_service._try_ai_extraction", fake_ai_extraction)
+
+    async with TestSessionFactory() as db:
+        async with db.begin():
+            group = await crud.create(db, Group(chat_id=-100444, semester=1, active=True))
+            topic = await crud.create(
+                db,
+                Topic(
+                    group_id=group.id,
+                    chat_id=group.chat_id,
+                    message_thread_id=99,
+                    topic_name="Mathematics",
+                    topic_type="course",
+                    status="active",
+                ),
+            )
+            course = await crud.create(
+                db,
+                Course(
+                    group_id=group.id,
+                    course_name="Mathematics",
+                    semester=1,
+                    topic_id=topic.id,
+                    active=True,
+                ),
+            )
+
+            await process_group_message(
+                session=db,
+                chat_id=group.chat_id,
+                thread_id=topic.message_thread_id,
+                text="exam on Tuesday",
+                user_id=123,
+                message_id=779,
+            )
+
+            items = await crud.get_all(db, AcademicItem, group_id=group.id)
+            reminders = await crud.get_all(db, Reminder)
+
+    assert len(items) == 1
+    assert items[0].item_type == "exam"
+    assert items[0].course_id == course.id
+    assert items[0].deadline is not None
+    assert reminders
+    assert all(reminder.thread_id == 99 for reminder in reminders)
+    assert sent_messages
+    assert sent_messages[0]["message_thread_id"] == 99
+    assert "Exam added" in sent_messages[0]["text"]
+    assert "Confidence" not in sent_messages[0]["text"]
 

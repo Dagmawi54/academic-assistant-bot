@@ -46,6 +46,13 @@ async def is_semantic_duplicate(
             if diff <= timedelta(hours=48):
                 # Also verify title similarity (if it's a completely different assignment, don't drop it!)
                 if title and existing.title:
+                    new_title = title.lower()
+                    existing_title = existing.title.lower()
+                    subtype_words = {"midterm", "final", "quiz", "project", "presentation", "lab"}
+                    new_subtypes = {word for word in subtype_words if word in new_title}
+                    existing_subtypes = {word for word in subtype_words if word in existing_title}
+                    if new_subtypes != existing_subtypes:
+                        continue
                     similarity = difflib.SequenceMatcher(None, title.lower(), existing.title.lower()).ratio()
                     if similarity < 0.5:
                         continue  # Titles are too different, probably distinct assignments

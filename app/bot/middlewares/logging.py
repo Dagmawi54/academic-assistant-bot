@@ -1,10 +1,15 @@
 """Structured logging middleware for all Telegram updates."""
 
+import json
+from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict
 
 from aiogram import BaseMiddleware
 from aiogram.types import TelegramObject, Update, CallbackQuery
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database import crud
+from app.database import session as db_session_module
 from app.logging import get_logger
 
 logger = get_logger("telegram")
@@ -58,12 +63,34 @@ class CallbackTraceMiddleware(BaseMiddleware):
         event: TelegramObject,
         data: Dict[str, Any],
     ) -> Any:
-        if not isinstance(event, CallbackQuery):
+        if not isinstance(event, CallbackQuery) and not (
+            hasattr(event, "data") and hasattr(event, "from_user")
+        ):
             return await handler(event, data)
 
         state = data.get("state")
         before_state = await state.get_state() if state else None
         chat_id = event.message.chat.id if event.message else None
+        ref_id = _callback_ref_id()
+
+        await _persist_callback_trace(
+            data,
+            phase="button_pressed",
+            ref_id=ref_id,
+            callback_data=event.data,
+            user_id=event.from_user.id,
+            chat_id=chat_id,
+            fsm_state_before=before_state,
+        )
+        await _persist_callback_trace(
+            data,
+            phase="callback_received",
+            ref_id=ref_id,
+            callback_data=event.data,
+            user_id=event.from_user.id,
+            chat_id=chat_id,
+            fsm_state_before=before_state,
+        )
 
         logger.info(
             "callback_received",
@@ -74,10 +101,29 @@ class CallbackTraceMiddleware(BaseMiddleware):
         )
 
         try:
+            await _persist_callback_trace(
+                data,
+                phase="callback_started",
+                ref_id=ref_id,
+                callback_data=event.data,
+                user_id=event.from_user.id,
+                chat_id=chat_id,
+                fsm_state_before=before_state,
+            )
             result = await handler(event, data)
             after_state = await state.get_state() if state else None
             logger.info(
-                "callback_handled",
+                "callback_completed",
+                callback_data=event.data,
+                user_id=event.from_user.id,
+                chat_id=chat_id,
+                fsm_state_before=before_state,
+                fsm_state_after=after_state,
+            )
+            await _persist_callback_trace(
+                data,
+                phase="callback_completed",
+                ref_id=ref_id,
                 callback_data=event.data,
                 user_id=event.from_user.id,
                 chat_id=chat_id,
@@ -94,4 +140,74 @@ class CallbackTraceMiddleware(BaseMiddleware):
                 fsm_state_before=before_state,
                 error_type=type(exc).__name__,
             )
-            raise
+            await _persist_callback_trace(
+                data,
+                phase="callback_failed",
+                ref_id=ref_id,
+                callback_data=event.data,
+                user_id=event.from_user.id,
+                chat_id=chat_id,
+                fsm_state_before=before_state,
+                error_type=type(exc).__name__,
+                error=str(exc)[:300],
+            )
+            await _answer_callback_failure(event, ref_id)
+            return None
+
+
+def _callback_ref_id() -> str:
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    return f"CB-{stamp}"
+
+
+async def _answer_callback_failure(event: CallbackQuery, ref_id: str) -> None:
+    try:
+        await event.answer(f"Action failed. Reference ID: {ref_id}", show_alert=True)
+    except Exception:
+        logger.exception("callback_failure_answer_failed", ref_id=ref_id)
+    if not event.message:
+        return
+    try:
+        await event.message.edit_text(
+            f"❌ <b>Action failed</b>\n\nReference:\n<code>{ref_id}</code>",
+            parse_mode="HTML",
+        )
+    except Exception:
+        logger.exception("callback_failure_edit_failed", ref_id=ref_id)
+
+
+async def _persist_callback_trace(data: dict[str, Any], **payload: Any) -> None:
+    details = json.dumps(payload, default=str, sort_keys=True)
+    existing_session = data.get("session")
+    if isinstance(existing_session, AsyncSession):
+        await crud.log_action(
+            existing_session,
+            action="callback_trace",
+            telegram_user_id=payload.get("user_id"),
+            chat_id=payload.get("chat_id"),
+            details=details,
+        )
+        await existing_session.flush()
+        return
+
+    session_obj = db_session_module.async_session_factory()
+    if isinstance(session_obj, AsyncSession):
+        await crud.log_action(
+            session_obj,
+            action="callback_trace",
+            telegram_user_id=payload.get("user_id"),
+            chat_id=payload.get("chat_id"),
+            details=details,
+        )
+        await session_obj.flush()
+        return
+
+    async with session_obj as session:
+        async with session.begin():
+            await crud.log_action(
+                session,
+                action="callback_trace",
+                telegram_user_id=payload.get("user_id"),
+                chat_id=payload.get("chat_id"),
+                details=details,
+            )

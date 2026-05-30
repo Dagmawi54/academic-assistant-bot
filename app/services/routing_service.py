@@ -1,5 +1,7 @@
 """Routing service — orchestrates classification, AI fallback, routing, and item creation."""
 
+import json
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import crud
@@ -19,7 +21,7 @@ from app.services.topic_context import resolve_topic_context
 logger = get_logger("routing_service")
 
 # Academic types that should always create an AcademicItem
-ACADEMIC_TYPES = {"ASSIGNMENT", "EXAM", "EXAM_COVERAGE", "SCHEDULE_UPDATE", "GENERAL_EVENT", "COURSE_EVENT"}
+ACADEMIC_TYPES = {"ASSIGNMENT", "EXAM", "QUIZ", "EXAM_COVERAGE", "SCHEDULE_UPDATE", "GENERAL_EVENT", "COURSE_EVENT"}
 
 
 async def process_group_message(
@@ -43,6 +45,16 @@ async def process_group_message(
 
     # 1. Ensure group is registered
     group = await crud.get_group_by_chat_id(session, chat_id)
+    if group:
+        await _log_event_pipeline_snapshot(
+            session,
+            phase="message_processed",
+            chat_id=chat_id,
+            thread_id=thread_id,
+            user_id=user_id,
+            message_id=message_id,
+            group_id=group.id,
+        )
     if not group:
         return  # Unregistered group — ignore
 
@@ -173,6 +185,12 @@ async def process_group_message(
             else:
                 chat_link = f"https://t.me/c/{base_chat_id}/{message_id}"
 
+        coverage_value = classification.coverage
+        if classification.message_type == "EXAM_COVERAGE":
+            from app.services.coverage_parser import dump_coverage, parse_coverage_text
+
+            coverage_value = dump_coverage(parse_coverage_text(text))
+
         item = AcademicItem(
             group_id=group.id,
             course_id=course.id if course else None,
@@ -180,7 +198,7 @@ async def process_group_message(
             title=classification.title,
             deadline=classification.deadline,
             room=classification.room,
-            coverage=classification.coverage,
+            coverage=coverage_value,
             status="active" if should_auto_approve(classification.confidence) else "new",
             confidence=classification.confidence,
             source_message_id=message_id,
@@ -189,6 +207,19 @@ async def process_group_message(
             raw_text=text,
         )
         item = await crud.create(session, item)
+        await _log_event_pipeline_snapshot(
+            session,
+            phase="item_created",
+            chat_id=chat_id,
+            thread_id=thread_id,
+            user_id=user_id,
+            message_id=message_id,
+            group_id=group.id,
+            item_id=item.id,
+            item_type=item.item_type,
+            course_id=item.course_id,
+            deadline=str(item.deadline) if item.deadline else None,
+        )
         logger.info(
             "academic_item_created",
             item_id=item.id,
@@ -202,8 +233,26 @@ async def process_group_message(
         if item.deadline:
             from app.services.reminder_service import create_reminders_for_item_in_session
 
-            await create_reminders_for_item_in_session(session, item)
-            logger.info("academic_reminders_created", item_id=item.id)
+            reminders = await create_reminders_for_item_in_session(session, item)
+            await _log_event_pipeline_snapshot(
+                session,
+                phase="reminders_created",
+                chat_id=chat_id,
+                thread_id=thread_id,
+                user_id=user_id,
+                message_id=message_id,
+                group_id=group.id,
+                item_id=item.id,
+                reminder_count=len(reminders),
+                reminder_ids=[reminder.id for reminder in reminders],
+            )
+            logger.info("academic_reminders_created", item_id=item.id, reminder_count=len(reminders))
+            logger.info(
+                "academic_scheduler_jobs_registered",
+                item_id=item.id,
+                job_ids=[f"reminder_{reminder.id}" for reminder in reminders],
+                next_runs=[str(reminder.send_time) for reminder in reminders],
+            )
 
     # 6. Send detection feedback to the SOURCE topic (visible acknowledgment)
     if item:
@@ -220,6 +269,16 @@ async def process_group_message(
                 item_id=item.id,
                 chat_id=chat_id,
                 thread_id=thread_id,
+            )
+            await _log_event_pipeline_snapshot(
+                session,
+                phase="ack_sent",
+                chat_id=chat_id,
+                thread_id=thread_id,
+                user_id=user_id,
+                message_id=message_id,
+                group_id=group.id,
+                item_id=item.id,
             )
         except Exception:
             logger.exception("detection_feedback_failed", item_id=item.id)
@@ -260,6 +319,7 @@ def _build_contextual_title(message_type: str, course_name: str) -> str | None:
     labels = {
         "ASSIGNMENT": "Assignment",
         "EXAM": "Exam",
+        "QUIZ": "Quiz",
         "EXAM_COVERAGE": "Exam Coverage",
         "SCHEDULE_UPDATE": "Schedule Update",
         "GENERAL_EVENT": "Notice",
@@ -271,42 +331,25 @@ def _build_contextual_title(message_type: str, course_name: str) -> str | None:
 
 def _build_detection_feedback(classification: ClassificationResult, item: AcademicItem) -> str:
     """Build a visible detection feedback message for the source topic."""
-    type_icons = {
-        "ASSIGNMENT": "📝",
-        "EXAM": "📋",
-        "EXAM_COVERAGE": "📖",
-        "SCHEDULE_UPDATE": "🔄",
-        "GENERAL_EVENT": "📢",
-        "COURSE_EVENT": "📌",
-    }
-    icon = type_icons.get(classification.message_type, "📌")
-    type_label = classification.message_type.replace("_", " ").title()
-
-    lines = [f"✅ <b>{icon} {type_label} Detected</b>"]
-
-    if classification.title:
-        lines.append(f"  <i>{classification.title}</i>")
-
+    when = ""
     if classification.deadline:
-        from app.utils.timezone import format_datetime
-        lines.append(f"  📅 {format_datetime(classification.deadline)}")
+        from app.utils.timezone import to_addis
 
-    if classification.room:
-        lines.append(f"  🏛 Room: {classification.room}")
+        when = f" for {to_addis(classification.deadline).strftime('%A')}"
 
-    if classification.coverage:
-        lines.append(f"  📖 Coverage: {classification.coverage}")
+    if classification.message_type == "ASSIGNMENT":
+        return "📌 <b>Assignment deadline recorded.</b>\nReminders scheduled." if item.deadline else "📌 <b>Assignment recorded.</b>"
+    if classification.message_type == "QUIZ":
+        return f"📌 <b>Quiz added{when}.</b>\nReminders scheduled." if item.deadline else "📌 <b>Quiz added.</b>"
+    if classification.message_type == "EXAM":
+        return f"📌 <b>Exam added{when}.</b>\nReminders scheduled." if item.deadline else "📌 <b>Exam added.</b>"
+    if classification.message_type == "EXAM_COVERAGE":
+        return "📌 <b>Coverage updated.</b>"
+    if classification.message_type == "SCHEDULE_UPDATE":
+        return "📌 <b>Schedule update recorded.</b>"
+    return "📌 <b>Academic item recorded.</b>"
 
-    if classification.course_hint:
-        lines.append(f"  📚 Course: {classification.course_hint}")
 
-    conf_pct = int(classification.confidence * 100)
-    lines.append(f"  <code>Confidence: {conf_pct}%</code>")
-
-    if item.deadline:
-        lines.append("\n⏰ <i>Reminders will be scheduled automatically.</i>")
-
-    return "\n".join(lines)
 
 
 async def _try_ai_extraction(text: str) -> dict | None:
@@ -337,6 +380,16 @@ async def _try_ai_extraction(text: str) -> dict | None:
     except Exception:
         logger.exception("ai_extraction_failed")
     return None
+
+
+async def _log_event_pipeline_snapshot(session: AsyncSession, **payload) -> None:
+    await crud.log_action(
+        session,
+        action="event_pipeline_snapshot",
+        telegram_user_id=payload.get("user_id"),
+        chat_id=payload.get("chat_id"),
+        details=json.dumps(payload, default=str, sort_keys=True),
+    )
 
 
 def _merge_ai_result(rule_result: ClassificationResult, ai_data: dict) -> ClassificationResult:

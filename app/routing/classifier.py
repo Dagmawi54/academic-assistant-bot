@@ -29,6 +29,8 @@ class ClassificationResult:
 
 ASSIGNMENT_KEYWORDS = {
     "assignment",
+    "asignment",
+    "asigment",
     "homework",
     "submit",
     "submission",
@@ -39,11 +41,15 @@ ASSIGNMENT_KEYWORDS = {
     "project",
     "lab report",
     "report",
+    "mid-term project",
 }
 
 EXAM_KEYWORDS = {
     "exam",
+    "fetena",
+    "feten",
     "test",
+    "mid",
     "midterm",
     "mid-term",
     "final",
@@ -125,7 +131,7 @@ DATE_PATTERNS = [
 
 # Room patterns
 ROOM_PATTERN = re.compile(
-    r"\b(?:room|hall|venue|class)\s*[:-]?\s*([A-Z]?\d{1,4}[A-Z]?)\b",
+    r"\b(?:room|hall|venue|class|kefl)\s*[:-]?\s*([A-Z]?\d{1,4}[A-Z]?)\b",
     re.IGNORECASE,
 )
 
@@ -242,11 +248,11 @@ def _extract_date(text: str) -> datetime | None:
         "fri": 4, "sat": 5, "sun": 6,
     }
 
-    if "tomorrow" in lower:
+    if "tomorrow" in lower or "nege" in lower:
         return now + timedelta(days=1)
-    if "day after tomorrow" in lower:
+    if "day after tomorrow" in lower or "kenege wodiya" in lower:
         return now + timedelta(days=2)
-    if "today" in lower:
+    if "today" in lower or "zare" in lower or "zarem" in lower:
         return now
     if "next week" in lower:
         return now + timedelta(days=7)

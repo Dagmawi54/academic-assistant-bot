@@ -69,7 +69,7 @@ async def send_reminder(reminder_id: int) -> None:
                     Reminder,
                     reminder.id,
                     sent=True,
-                    sent_at=now_addis(),
+                    sent_at=now_addis().replace(tzinfo=None),
                 )
                 logger.info(
                     "reminder_sent",
@@ -93,7 +93,7 @@ async def start_scheduler() -> None:
     async with async_session_factory() as session:
         async with session.begin():
             pending = await crud.get_pending_reminders(session)
-            now = now_addis()
+            now = now_addis().replace(tzinfo=None)
             scheduled = 0
 
             for reminder in pending:
@@ -112,7 +112,7 @@ async def start_scheduler() -> None:
                         scheduled += 1
 
             next_runs = [
-                f"{job.id}:{job.next_run_time.isoformat() if job.next_run_time else 'none'}"
+                f"{job.id}:{job.next_run_time.isoformat() if getattr(job, 'next_run_time', None) else 'none'}"
                 for job in scheduler.get_jobs()
             ]
             logger.info(

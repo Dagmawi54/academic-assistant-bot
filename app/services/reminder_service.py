@@ -39,7 +39,7 @@ async def create_reminders_for_item_in_session(
             topic = await crud.get_by_id(session, Topic, course.topic_id)
             thread_id = topic.message_thread_id if topic else None
 
-    times = reminder_times(item.deadline, settings.reminder_offsets_hours)
+    times = [_as_db_datetime(send_time) for send_time in reminder_times(item.deadline, settings.reminder_offsets_hours)]
     reminders = [
         Reminder(
             item_id=item.id,
@@ -67,6 +67,11 @@ async def create_reminders_for_item_in_session(
         thread_id=thread_id,
     )
     return reminders
+
+
+def _as_db_datetime(value):
+    """Store datetimes in the naive shape expected by existing DB columns."""
+    return value.replace(tzinfo=None) if getattr(value, "tzinfo", None) else value
 
 
 async def recreate_reminders_for_item(item_id: int) -> None:

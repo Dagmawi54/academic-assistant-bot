@@ -38,18 +38,21 @@ async def init_db() -> None:
         await conn.run_sync(Base.metadata.create_all)
     logger.info("database_tables_checked")
         
-    # Second, isolated transaction for the alter table hack so it doesn't rollback create_all if it fails
-    try:
-        async with engine.begin() as conn:
-            await conn.execute(
-                text("ALTER TABLE groups ADD COLUMN ai_moderation_enabled BOOLEAN DEFAULT FALSE")
+    # Lightweight compatibility migrations for existing deployments.
+    optional_migrations = [
+        "ALTER TABLE groups ADD COLUMN IF NOT EXISTS ai_moderation_enabled BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE academic_items ADD COLUMN IF NOT EXISTS source_message_link VARCHAR(255)",
+    ]
+    for statement in optional_migrations:
+        try:
+            async with engine.begin() as conn:
+                await conn.execute(text(statement))
+        except Exception as exc:
+            logger.info(
+                "database_optional_migration_skipped",
+                statement=statement,
+                error_type=type(exc).__name__,
             )
-            await conn.execute(
-                text("ALTER TABLE academic_items ADD COLUMN source_message_link VARCHAR(255)")
-            )
-    except Exception as exc:
-        # Postgres throws if column already exists
-        logger.info("database_optional_migration_skipped", error_type=type(exc).__name__)
 
 
 async def close_db() -> None:

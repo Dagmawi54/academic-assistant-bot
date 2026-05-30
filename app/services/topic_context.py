@@ -59,13 +59,26 @@ async def resolve_topic_context(
         )
         return TopicContext(topic=topic, course=None)
 
-    stmt = select(Course).where(
-        Course.group_id == group_id,
-        Course.topic_id == topic.id,
-        Course.active == True,  # noqa: E712
+    stmt = (
+        select(Course)
+        .where(
+            Course.group_id == group_id,
+            Course.topic_id == topic.id,
+            Course.active == True,  # noqa: E712
+        )
+        .order_by(Course.id.desc())
     )
     result = await session.execute(stmt)
-    course = result.scalar_one_or_none()
+    courses = result.scalars().all()
+    course = courses[0] if courses else None
+    if len(courses) > 1:
+        logger.warning(
+            "topic_context_multiple_active_courses",
+            group_id=group_id,
+            topic_id=topic.id,
+            selected_course_id=course.id,
+            duplicate_course_ids=[c.id for c in courses[1:]],
+        )
 
     logger.info(
         "topic_context_resolved",
