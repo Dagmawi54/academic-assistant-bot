@@ -42,6 +42,16 @@ ASSIGNMENT_KEYWORDS = {
     "lab report",
     "report",
     "mid-term project",
+    "yemidersbet",
+    "yetimhirt",
+}
+
+QUIZ_KEYWORDS = {
+    "quiz",
+    "test",
+    "mid",
+    "assignment",
+    "exam"
 }
 
 EXAM_KEYWORDS = {
@@ -57,6 +67,7 @@ EXAM_KEYWORDS = {
     "quiz",
     "assessment",
     "examination",
+    "mekera",
 }
 
 COVERAGE_KEYWORDS = {
@@ -153,6 +164,7 @@ def classify(text: str) -> ClassificationResult:
     scores: dict[str, float] = {
         "ASSIGNMENT": _score_keywords(lower, ASSIGNMENT_KEYWORDS),
         "EXAM": _score_keywords(lower, EXAM_KEYWORDS),
+        "QUIZ": _score_keywords(lower, QUIZ_KEYWORDS),
         "EXAM_COVERAGE": _score_keywords(lower, COVERAGE_KEYWORDS),
         "SCHEDULE_UPDATE": _score_keywords(lower, SCHEDULE_KEYWORDS),
         "GENERAL_EVENT": _score_keywords(lower, GENERAL_KEYWORDS),
@@ -162,17 +174,29 @@ def classify(text: str) -> ClassificationResult:
     # A casual question like "anyone have the notes from today?" should not become
     # an assignment just because it contains a relative date.
     has_academic_signal = any(score > 0 for score in scores.values())
+    
+    # Context-aware boost: ONLY if there is already an academic word match AND explicit context (course/deadline/room)
+    # This prevents the system from triggering false positives in normal chat.
+    if has_academic_signal:
+        is_academic_context = bool(course_hint or deadline or room)
+        if is_academic_context:
+            for key in scores:
+                if scores[key] > 0:
+                    scores[key] += 0.20
+
     if deadline and has_academic_signal:
         scores["ASSIGNMENT"] += 0.15
         scores["EXAM"] += 0.10
+        scores["QUIZ"] += 0.10
 
     if room:
         scores["SCHEDULE_UPDATE"] += 0.15
         scores["EXAM"] += 0.10
+        scores["QUIZ"] += 0.10
 
     if course_hint:
         # Presence of a course name boosts course-specific types
-        for key in ("ASSIGNMENT", "EXAM", "EXAM_COVERAGE"):
+        for key in ("ASSIGNMENT", "EXAM", "QUIZ", "EXAM_COVERAGE"):
             scores[key] += 0.10
 
     # Pick the best

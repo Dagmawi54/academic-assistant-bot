@@ -249,17 +249,19 @@ def test_announcement_formatter_highlights_urgency_and_dates():
 
 
 @pytest.mark.asyncio
-async def test_ask_reply_document_text_extraction(monkeypatch):
-    from app.bot.handlers.commands import _extract_document_text
+async def test_document_extraction_helpers(monkeypatch):
+    """Test the document extraction helper mapping."""
 
-    async def fake_pdf(data):
-        return f"pdf:{data.decode()}"
+    async def mock_pdf(b):
+        return "pdf:" + b.decode()
 
-    async def fake_docx(data):
-        return f"docx:{data.decode()}"
+    async def mock_docx(b):
+        return "docx:" + b.decode()
 
-    monkeypatch.setattr("app.files.parser.extract_text_from_pdf", fake_pdf)
-    monkeypatch.setattr("app.files.parser.extract_text_from_docx", fake_docx)
+    monkeypatch.setattr("app.files.parser.extract_text_from_pdf", mock_pdf)
+    monkeypatch.setattr("app.files.parser.extract_text_from_docx", mock_docx)
+
+    from app.services.intent_router import _extract_document_text
 
     assert await _extract_document_text(b"hello", "txt") == "hello"
     assert await _extract_document_text(b"slides", "pdf") == "pdf:slides"

@@ -99,14 +99,24 @@ async def process_group_message(
 
     # Skip non-academic messages (DISCUSSION or UNKNOWN)
     if classification.message_type in ("DISCUSSION", "UNKNOWN"):
-        # If the rule-based engine is reasonably sure it's just chat,
-        # or if the message is very short, do NOT call the expensive AI.
-        if classification.confidence >= 0.5 or len(text.split()) < 3:
+        if len(text.split()) < 3:
             logger.info("ROUTE_EXIT", trace_id=trace_id, handler_name="process_group_message")
-            return  # Clearly not academic or too short to be meaningful
+            return
 
-        # Only trial AI for high-importance messages that might have been missed
-        ai_result = await _try_ai_extraction(text)
+        # Dual threshold routing logic
+        if classification.confidence >= 0.7:
+            # High confidence it is just discussion -> Drop
+            logger.info("ROUTE_EXIT", trace_id=trace_id, handler_name="process_group_message")
+            return
+        elif classification.confidence >= 0.5:
+            # Mid confidence -> Trigger classifier review / AI trial
+            logger.info("ROUTE_LOG", trace_id=trace_id, action="classifier_review_triggered")
+            ai_result = await _try_ai_extraction(text)
+        else:
+            # Low confidence -> Fallback to AI
+            logger.info("ROUTE_LOG", trace_id=trace_id, action="ai_fallback_triggered")
+            ai_result = await _try_ai_extraction(text)
+
         if ai_result and ai_result.get("type") not in (
             "discussion",
             "unknown",
