@@ -119,7 +119,7 @@ async def detect_intent(message, bot) -> IntentResult:
             from app.ai.groq_client import groq_client
 
             transcript = await groq_client.transcribe_audio(audio_bytes, f"audio.{ext}")
-            payload = transcript.strip() if transcript else None
+            payload = transcript.strip() if transcript else "[Audio was completely silent or transcription failed.]"
             return IntentResult(
                 type="audio",
                 payload=payload,
@@ -128,7 +128,7 @@ async def detect_intent(message, bot) -> IntentResult:
             )
         except Exception as exc:
             logger.exception("intent_audio_extraction_failed", error=str(exc)[:200])
-            return IntentResult(type="audio", payload=None, query=query)
+            return IntentResult(type="audio", payload=f"[Audio transcription failed internally: {exc}]", query=query)
 
     # --- Reply media (check replied message) ---
     reply = getattr(message, "reply_to_message", None)
@@ -193,11 +193,12 @@ async def _extract_reply_content(reply, bot, logger) -> IntentResult | None:
             from app.ai.groq_client import groq_client
 
             transcript = await groq_client.transcribe_audio(audio_bytes, f"reply.{ext}")
-            if transcript and transcript.strip():
-                return IntentResult(type="audio", payload=transcript.strip(), query="")
-        except Exception:
+            payload = transcript.strip() if transcript else "[Audio transcription was empty or failed.]"
+            return IntentResult(type="audio", payload=payload, query="")
+        except Exception as exc:
             logger.exception("reply_audio_extraction_failed")
-
+            return IntentResult(type="audio", payload=f"[Audio extraction failed: {exc}]", query="")
+            
     return None
 
 

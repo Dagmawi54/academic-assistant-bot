@@ -149,7 +149,13 @@ class ResponseFormatter:
         text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
         text = re.sub(r'__(.+?)__', r'<i>\1</i>', text)
         
-        return sanitize_telegram_html(text)
+        # Format headers as bold
+        text = re.sub(r'(?m)^###?\s+(.+)$', r'<b>\1</b>', text)
+        # Format lists
+        text = re.sub(r'(?m)^[\*\-]\s+', r'• ', text)
+        
+        # Remove standalone hash markup
+        text = re.sub(r'(?m)^#\s+(.+)$', r'<b>\1</b>', text)
 
 def clean_text(text: str) -> str:
     """Full text cleanup pipeline: whitespace + keyword normalization."""

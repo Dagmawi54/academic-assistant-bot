@@ -370,7 +370,9 @@ async def _process_ask(
     sys_prompt = f"{personality_profile}\n\n{base_system_prompt}"
     
     if file_context:
-        sys_prompt += "\nIf a document is provided, thoroughly analyze its contents and draw heavily from it."
+        if "IMAGE CONTENT" in file_context:
+            sys_prompt += "\nAn image was provided. Note: The OCR text might contain inaccuracies, especially for Amharic or non-English scripts. Try to interpret the meaning contextually even if some letters seem jumbled."
+        sys_prompt += "\nIf a document/media is provided, thoroughly analyze its contents and draw heavily from it."
 
     try:
         messages = [{"role": "system", "content": sys_prompt}]

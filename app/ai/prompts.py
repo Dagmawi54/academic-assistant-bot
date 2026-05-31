@@ -27,7 +27,7 @@ Message: "{text}"
 Respond with JSON:
 {{
     "type": "assignment" | "exam" | "quiz" | "exam_coverage" | "schedule_update" | "general_notice" | "discussion" | "unknown",
-    "course": "course name or null",
+    "course": "course name or null (resolve obvious abbreviations, e.g. 'arch' -> architecture)",
     "deadline": "ISO 8601 datetime or null",
     "room": "room/venue or null",
     "coverage": {{
@@ -36,7 +36,7 @@ Respond with JSON:
         "raw_statement": "summary of coverage"
     }} or null,
     "title": "short descriptive title",
-    "confidence": 0.0 to 1.0
+    "confidence": 0.0 to 1.0 (Give > 0.8 for clear assignments/exams even if informally written)
 }}""",
         },
     ]
