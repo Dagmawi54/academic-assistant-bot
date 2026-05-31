@@ -371,7 +371,7 @@ async def _process_ask(
     
     if file_context:
         if "IMAGE CONTENT" in file_context:
-            sys_prompt += "\nAn image was provided. Note: The OCR text might contain inaccuracies, especially for Amharic or non-English scripts. Try to interpret the meaning contextually even if some letters seem jumbled."
+            sys_prompt += "\nAn image was provided. Note: The OCR text might contain inaccuracies (especially Amharic). CRITICAL: If the OCR text is mostly unreadable symbols or gibberish, explicitly state that you cannot read the image. DO NOT GUESS OR INVENT details."
         sys_prompt += "\nIf a document/media is provided, thoroughly analyze its contents and draw heavily from it."
 
     try:

@@ -35,6 +35,36 @@ async def process_group_message(
     trace_id: str | None = None,
 ) -> None:
     """Full message processing pipeline: classify → extract → route → notify."""
+    try:
+        await _process_group_message_inner(
+            session,
+            chat_id=chat_id,
+            thread_id=thread_id,
+            text=text,
+            user_id=user_id,
+            message_id=message_id,
+            trace_id=trace_id,
+        )
+    except Exception:
+        logger.exception(
+            "ROUTE_FATAL",
+            trace_id=trace_id,
+            chat_id=chat_id,
+            message_id=message_id,
+        )
+
+
+async def _process_group_message_inner(
+    session: AsyncSession,
+    *,
+    chat_id: int,
+    thread_id: int | None,
+    text: str,
+    user_id: int | None,
+    message_id: int,
+    trace_id: str | None = None,
+) -> None:
+    """Inner implementation — separated so top-level can catch all exceptions."""
     logger.info(
         "ROUTE_ENTRY",
         trace_id=trace_id,
@@ -425,9 +455,18 @@ def _merge_ai_result(rule_result: ClassificationResult, ai_data: dict) -> Classi
     """Merge AI extraction data into the rule-based classification."""
     from app.routing.classifier import ClassificationResult as CR
 
+    # Safe float cast — AI JSON sometimes returns confidence as string
+    try:
+        ai_confidence = float(ai_data.get("confidence", 0.0))
+    except (ValueError, TypeError):
+        ai_confidence = 0.0
+
+    # Normalize AI type to uppercase to match rule-based types
+    ai_type = str(ai_data.get("type", rule_result.message_type)).upper()
+
     return CR(
-        message_type=ai_data.get("type", rule_result.message_type),
-        confidence=max(rule_result.confidence, ai_data.get("confidence", 0.0)),
+        message_type=ai_type,
+        confidence=max(rule_result.confidence, ai_confidence),
         course_hint=ai_data.get("course") or rule_result.course_hint,
         deadline=ai_data.get("deadline") or rule_result.deadline,
         room=ai_data.get("room") or rule_result.room,

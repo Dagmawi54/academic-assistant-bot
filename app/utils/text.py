@@ -146,16 +146,21 @@ class ResponseFormatter:
         text = "\n".join(safe_lines)
 
         # Convert simple markdown to HTML tags if models slip up
-        text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
-        text = re.sub(r'__(.+?)__', r'<i>\1</i>', text)
+        text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text, flags=re.DOTALL)
+        text = re.sub(r'__(.+?)__', r'<i>\1</i>', text, flags=re.DOTALL)
         
         # Format headers as bold
-        text = re.sub(r'(?m)^###?\s+(.+)$', r'<b>\1</b>', text)
+        text = re.sub(r'(?m)^(\s*)###?\s+(.+)$', r'\1<b>\2</b>', text)
         # Format lists
-        text = re.sub(r'(?m)^[\*\-]\s+', r'• ', text)
+        text = re.sub(r'(?m)^(\s*)[\*\-]\s+', r'\1• ', text)
         
         # Remove standalone hash markup
-        text = re.sub(r'(?m)^#\s+(.+)$', r'<b>\1</b>', text)
+        text = re.sub(r'(?m)^(\s*)#\s+(.+)$', r'\1<b>\2</b>', text)
+
+        # Convert numbered lists (1. item) to clean format
+        text = re.sub(r'(?m)^(\s*)\d+\.\s+', r'\1', text)
+
+        return sanitize_telegram_html(text)
 
 def clean_text(text: str) -> str:
     """Full text cleanup pipeline: whitespace + keyword normalization."""
