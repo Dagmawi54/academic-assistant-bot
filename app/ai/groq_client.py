@@ -141,7 +141,8 @@ class GroqClient:
             "file": (filename, audio_bytes, "audio/ogg"),
             "model": (None, model),
             "response_format": (None, "json"),
-            "prompt": (None, "Ethiopian academic context. Language could be Amharic or English."),
+            "language": (None, "am"),
+            "prompt": (None, "Ethiopian academic context."),
         }
 
         for attempt in range(max_retries):

@@ -322,12 +322,17 @@ async def cmd_ask_with_file(message: types.Message, state: FSMContext, bot: Bot)
 # ======================================================
 
 
-@router.message(StateFilter(any_state), F.text, F.reply_to_message)
-async def continue_bot_conversation(message: types.Message, state: FSMContext, bot: Bot) -> None:
+@router.message(
+    StateFilter(any_state),
+    F.text,
+    F.reply_to_message.as_("reply"),
+    F.reply_to_message.from_user.is_bot == True
+)
+async def continue_bot_conversation(message: types.Message, state: FSMContext, bot: Bot, reply: types.Message) -> None:
     """Continue a short conversation when a user replies to the bot."""
-    reply = message.reply_to_message
-    if not reply or not reply.from_user or reply.from_user.id != bot.id:
+    if reply.from_user.id != bot.id:
         return
+
     await state.clear()
     await _process_ask(message, message.text.strip(), file_context=None)
 
