@@ -1,6 +1,6 @@
 """Admin DM handler — FSM-driven configuration wizards."""
 
-from aiogram import Router, types, F
+from aiogram import Router, types, F, Bot
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.state import any_state
 from aiogram.fsm.context import FSMContext
