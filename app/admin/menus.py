@@ -135,9 +135,16 @@ def semester_select() -> InlineKeyboardMarkup:
 
 def topic_select(topics: Sequence[Topic]) -> InlineKeyboardMarkup:
     """Select from available active topics."""
+    seen = set()
+    unique_topics = []
+    for t in topics:
+        if t.topic_name not in seen:
+            seen.add(t.topic_name)
+            unique_topics.append(t)
+            
     buttons = [
         [InlineKeyboardButton(text=topic.topic_name, callback_data=f"topic:{topic.id}")]
-        for topic in topics
+        for topic in unique_topics[:50]
     ]
     buttons.append([InlineKeyboardButton(text="Cancel", callback_data="cancel")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -145,9 +152,16 @@ def topic_select(topics: Sequence[Topic]) -> InlineKeyboardMarkup:
 
 def topic_select_with_skip(topics: Sequence[Topic]) -> InlineKeyboardMarkup:
     """Select from available active topics, with a skip option."""
+    seen = set()
+    unique_topics = []
+    for t in topics:
+        if t.topic_name not in seen:
+            seen.add(t.topic_name)
+            unique_topics.append(t)
+
     buttons = [
         [InlineKeyboardButton(text=topic.topic_name, callback_data=f"topic:{topic.id}")]
-        for topic in topics
+        for topic in unique_topics[:50]
     ]
     buttons.append([InlineKeyboardButton(text="Skip (no link)", callback_data="skip_topic")])
     buttons.append([InlineKeyboardButton(text="Cancel", callback_data="cancel")])

@@ -262,7 +262,7 @@ async def course_group_selected(callback: types.CallbackQuery, state: FSMContext
     group_id = int(callback.data.split(":")[1])
     await state.update_data(group_id=group_id)
     await state.set_state(AddCourseStates.waiting_course_name)
-    await callback.message.edit_text("📚 Enter the *course name*:")
+    await callback.message.edit_text("📚 Enter the <b>course name</b>:", parse_mode="HTML")
     await callback.answer()
 
 
@@ -302,12 +302,14 @@ async def course_name_received(
             f"(No forum topics found to link)\n\n"
             f"📚 Enter another <b>course name</b> or press Cancel:",
             reply_markup=menus.cancel_only(),
+            parse_mode="HTML",
         )
     else:
         await state.set_state(AddCourseStates.waiting_topic_select)
         await message.answer(
             f"🔗 Link <b>{html.escape(course_name)}</b> to a forum topic:",
             reply_markup=menus.topic_select_with_skip(topics),
+            parse_mode="HTML",
         )
 
 
