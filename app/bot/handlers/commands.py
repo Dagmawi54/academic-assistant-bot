@@ -324,16 +324,40 @@ async def cmd_ask_with_file(message: types.Message, state: FSMContext, bot: Bot)
 
 @router.message(
     StateFilter(any_state),
-    F.text,
     F.reply_to_message.as_("reply"),
     F.reply_to_message.from_user.is_bot == True
 )
 async def continue_bot_conversation(message: types.Message, state: FSMContext, bot: Bot, reply: types.Message) -> None:
-    """Continue a short conversation when a user replies to the bot."""
+    """Continue a short conversation when a user replies to the bot (text, voice, or audio)."""
     if reply.from_user.id != bot.id:
         return
 
     await state.clear()
+
+    # Handle voice/audio replies
+    audio_obj = message.voice or message.audio
+    if audio_obj:
+        try:
+            from app.ai.groq_client import groq_client
+            downloaded = await bot.download(audio_obj)
+            audio_bytes = downloaded.read()
+            ext = "ogg" if message.voice else "mp3"
+            transcript = await groq_client.transcribe_audio(audio_bytes, f"audio.{ext}")
+            if transcript and transcript.strip():
+                file_context = f"[VOICE TRANSCRIPTION]\n{transcript.strip()}"
+                query = message.caption or "Respond to this voice message."
+                await _process_ask(message, query, file_context=file_context)
+                return
+            else:
+                await message.answer("Couldn't catch that — try again or type it out?", parse_mode=None)
+                return
+        except Exception:
+            await message.answer("Voice processing failed. Try typing your message instead.", parse_mode=None)
+            return
+
+    if not message.text:
+        return
+
     await _process_ask(message, message.text.strip(), file_context=None)
 
 
@@ -358,15 +382,15 @@ async def _process_ask(
 
     # Personality & formatting rules
     personality = (
-        "You are Dagi — a sharp, friendly, and culturally aware AI study buddy built for Ethiopian university students. "
+        "You are Dagi — a sharp, friendly AI study buddy for university students. "
         "You speak naturally like a smart classmate who actually pays attention in lecture. "
-        "You understand Amharic (አማርኛ), transliterated Amharic, and English equally well. "
-        "You're warm but direct — no corporate fluff, no robotic lists unless the user asks for structure. "
+        "LANGUAGE RULE: Always reply in the SAME language the user writes in. If they write in English, respond in English. "
+        "If they write in Amharic, respond in Amharic. NEVER randomly mix in Amharic words when the user is writing in English. "
+        "You're warm but direct — no corporate fluff, no robotic lists unless asked. "
         "When someone says 'how u doing' you chat like a friend, not a customer service bot. "
         "When someone asks an academic question, you become a focused tutor who explains clearly. "
         "You have personality — you can joke, empathize, and keep it real. "
-        "You NEVER start responses with 'I'm an AI' disclaimers or generic intros like 'Great question!' "
-        "If someone shares a voice note or image, acknowledge what you received specifically. "
+        "You NEVER start with 'I'm an AI' disclaimers or generic intros like 'Great question!' "
         "Keep responses concise and punchy unless depth is specifically needed."
     )
     

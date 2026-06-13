@@ -112,6 +112,12 @@ def sanitize_telegram_html(text: str) -> str:
     # 2. Escape the remaining string completely (catches bare <, >, &)
     escaped_text = html.escape(text_with_placeholders)
     
+    # 2b. Unescape quote entities — Telegram renders &quot; and &#x27; as literal text
+    escaped_text = escaped_text.replace("&quot;", '"')
+    escaped_text = escaped_text.replace("&#x27;", "'")
+    escaped_text = escaped_text.replace("&apos;", "'")
+    escaped_text = escaped_text.replace("&#39;", "'")
+    
     # 3. Restore the valid tags
     for i, p in enumerate(placeholders):
         escaped_text = escaped_text.replace(f"@@TAG_{i}@@", p)
