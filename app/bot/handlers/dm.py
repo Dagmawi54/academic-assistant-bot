@@ -14,14 +14,14 @@ router = Router(name="dm")
 async def chat_with_bot(message: types.Message, bot: Bot) -> None:
     """Seamlessly chat with the bot in DMs without needing /ask.
     Only triggers if the user has no active FSM wizard (StateFilter(None)).
-    Handles both normal text messages and document uploads identically to /ask.
+    Handles text, documents, voice, audio, and photos identically to /ask.
     """
-    
+
+    # --- Document uploads ---
     doc = message.document
     if doc:
-        # Re-use the document parsing logic by constructing a synthetic query if missing
         query = message.caption or "Please analyze and summarize this document."
-        
+
         file_name = doc.file_name or "unknown"
         ext = file_name.rsplit(".", 1)[-1].lower() if "." in file_name else ""
 
@@ -64,7 +64,7 @@ async def chat_with_bot(message: types.Message, bot: Bot) -> None:
 
             await status_msg.edit_text("⏳ Analyzing document...", parse_mode=None)
             file_context = f"--- DOCUMENT: {file_name} ---\n{extracted}\n--- END DOCUMENT ---"
-            
+
             await _process_ask(message, query=query, file_context=file_context, status_msg=status_msg)
 
         except Exception as e:
@@ -72,10 +72,66 @@ async def chat_with_bot(message: types.Message, bot: Bot) -> None:
                 await status_msg.edit_text(f"Error reading file: {str(e)[:200]}", parse_mode=None)
             except Exception:
                 pass
+        return
 
-    else:
-        # Standard text message chat
-        if not message.text:
-            return
-            
+    # --- Voice / Audio messages ---
+    audio_obj = message.voice or message.audio
+    if audio_obj:
+        status_msg = await message.answer("🎙️ Listening...", parse_mode=None)
+        try:
+            from app.ai.groq_client import groq_client
+
+            downloaded = await bot.download(audio_obj)
+            audio_bytes = downloaded.read()
+            ext = "ogg" if message.voice else "mp3"
+            transcript = await groq_client.transcribe_audio(audio_bytes, f"audio.{ext}")
+
+            if transcript and transcript.strip():
+                file_context = f"[VOICE TRANSCRIPTION]\n{transcript.strip()}"
+                query = message.caption or "Respond to this voice message."
+                await status_msg.edit_text("⏳ Thinking...", parse_mode=None)
+                await _process_ask(message, query, file_context=file_context, status_msg=status_msg)
+            else:
+                await status_msg.edit_text(
+                    "Couldn't catch that — try again or type it out?", parse_mode=None
+                )
+        except Exception:
+            logger.exception("dm_voice_processing_failed")
+            try:
+                await status_msg.edit_text(
+                    "Voice processing failed. Try typing your message instead.", parse_mode=None
+                )
+            except Exception:
+                pass
+        return
+
+    # --- Photo messages (OCR) ---
+    if message.photo:
+        status_msg = await message.answer("🔍 Analyzing image...", parse_mode=None)
+        try:
+            from app.ocr.engine import extract_text_from_image
+
+            photo = message.photo[-1]
+            downloaded = await bot.download(photo)
+            image_bytes = downloaded.read()
+            ocr_text = await extract_text_from_image(image_bytes)
+
+            query = message.caption or "Analyze and explain this image."
+            file_context = f"[IMAGE OCR DATA]\n{ocr_text}" if ocr_text else None
+
+            await status_msg.edit_text("⏳ Thinking...", parse_mode=None)
+            await _process_ask(message, query, file_context=file_context, status_msg=status_msg)
+        except Exception:
+            logger.exception("dm_photo_processing_failed")
+            try:
+                await status_msg.edit_text(
+                    "Image processing failed. Try again or describe your question.", parse_mode=None
+                )
+            except Exception:
+                pass
+        return
+
+    # --- Standard text message ---
+    if message.text:
         await _process_ask(message, query=message.text, file_context=None)
+

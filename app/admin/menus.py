@@ -7,17 +7,19 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from app.database.models import Course, Group, Topic
 
 
-def main_menu() -> InlineKeyboardMarkup:
+def main_menu(has_groups: bool = True) -> InlineKeyboardMarkup:
     """Top-level admin menu."""
     buttons = [
-        [InlineKeyboardButton(text="Courses", callback_data="menu:cat_courses")],
-        [InlineKeyboardButton(text="Semester Management", callback_data="menu:semester")],
-        [InlineKeyboardButton(text="Raw Broadcast", callback_data="menu:broadcast")],
-        [InlineKeyboardButton(text="Communications", callback_data="menu:cat_communications")],
-        [InlineKeyboardButton(text="Events", callback_data="menu:cat_events")],
-        [InlineKeyboardButton(text="Administration", callback_data="menu:cat_administration")],
-        [InlineKeyboardButton(text="Analytics & Logs", callback_data="menu:cat_analytics")],
+        [InlineKeyboardButton(text="➕ Register / Setup New Group", callback_data="menu:setup_group")],
     ]
+    if has_groups:
+        buttons.extend([
+            [InlineKeyboardButton(text="📚 Add/Manage Courses", callback_data="menu:cat_courses")],
+            [InlineKeyboardButton(text="📢 Broadcasts & Announcements", callback_data="menu:cat_communications")],
+            [InlineKeyboardButton(text="📅 Events & Reminders", callback_data="menu:cat_events")],
+            [InlineKeyboardButton(text="⚙️ Admin & Permissions", callback_data="menu:cat_administration")],
+            [InlineKeyboardButton(text="📊 Analytics & Logs", callback_data="menu:cat_analytics")],
+        ])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -34,8 +36,8 @@ def cat_infrastructure() -> InlineKeyboardMarkup:
 
 def cat_courses() -> InlineKeyboardMarkup:
     buttons = [
-        [InlineKeyboardButton(text="Setup Group", callback_data="menu:setup_group")],
         [InlineKeyboardButton(text="Add Course", callback_data="menu:add_course")],
+        [InlineKeyboardButton(text="Semester Management", callback_data="menu:semester")],
         [InlineKeyboardButton(text="Back", callback_data="menu:main")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -44,8 +46,10 @@ def cat_courses() -> InlineKeyboardMarkup:
 def cat_communications() -> InlineKeyboardMarkup:
     buttons = [
         [InlineKeyboardButton(text="Exam Coverage", callback_data="menu:exam_coverage")],
-        [InlineKeyboardButton(text="AI Announcement", callback_data="menu:announcements")],
-        [InlineKeyboardButton(text="Raw Broadcast", callback_data="menu:broadcast")],
+        [
+            InlineKeyboardButton(text="AI Announcement", callback_data="menu:announcements"),
+            InlineKeyboardButton(text="Raw Broadcast", callback_data="menu:broadcast"),
+        ],
         [InlineKeyboardButton(text="Targeted Course Push", callback_data="menu:targeted_push")],
         [InlineKeyboardButton(text="Back", callback_data="menu:main")],
     ]
@@ -81,18 +85,23 @@ def cat_analytics() -> InlineKeyboardMarkup:
 def cat_events() -> InlineKeyboardMarkup:
     buttons = [
         [InlineKeyboardButton(text="📅 Upcoming Events", callback_data="menu:events_upcoming")],
-        [InlineKeyboardButton(text="📚 Exams", callback_data="menu:events_exams")],
-        [InlineKeyboardButton(text="📝 Assignments", callback_data="menu:events_assignments")],
-        [InlineKeyboardButton(text="❓ Quizzes", callback_data="menu:events_quizzes")],
-        [InlineKeyboardButton(text="⏰ Reminders", callback_data="menu:events_reminders")],
-        [InlineKeyboardButton(text="Recently Detected", callback_data="menu:events_recent")],
-        [InlineKeyboardButton(text="📖 Coverage Records", callback_data="menu:events_coverage")],
-        [InlineKeyboardButton(text="Scheduler Jobs", callback_data="menu:events_scheduler")],
-        [InlineKeyboardButton(text="⚠️ Review Queue", callback_data="menu:events_review")],
-        [InlineKeyboardButton(text="Suppressed Duplicates", callback_data="menu:events_duplicates")],
+        [
+            InlineKeyboardButton(text="📚 Exams", callback_data="menu:events_exams"),
+            InlineKeyboardButton(text="📝 Assignments", callback_data="menu:events_assignments"),
+            InlineKeyboardButton(text="❓ Quizzes", callback_data="menu:events_quizzes"),
+        ],
+        [
+            InlineKeyboardButton(text="⏰ Reminders", callback_data="menu:events_reminders"),
+            InlineKeyboardButton(text="📖 Coverage", callback_data="menu:events_coverage"),
+        ],
+        [
+            InlineKeyboardButton(text="⚠️ Review Queue", callback_data="menu:events_review"),
+            InlineKeyboardButton(text="Recently Detected", callback_data="menu:events_recent"),
+        ],
         [InlineKeyboardButton(text="Back", callback_data="menu:main")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
 
 
 def group_select(groups: Sequence[Group], prefix: str = "group") -> InlineKeyboardMarkup:

@@ -33,43 +33,53 @@ async def start_setup_group(
         "📋 <b>Group Setup</b>\n\n"
         "First, forward any message from the group you want to set up, "
         "or send the group chat ID.",
+        parse_mode="HTML",
     )
     await callback.answer()
 
 
 @router.message(SetupGroupStates.waiting_department, F.chat.type == "private")
-async def setup_receive_chat_id(message: types.Message, state: FSMContext) -> None:
+async def setup_receive_chat_id(message: types.Message, state: FSMContext, bot: Bot) -> None:
     """Receive group reference, then ask for department."""
-    # Check if it's a forwarded message from a group
+    chat_id = None
     if message.forward_from_chat and message.forward_from_chat.id:
         chat_id = message.forward_from_chat.id
-        await state.update_data(chat_id=chat_id)
     elif message.text and message.text.lstrip("-").isdigit():
         chat_id = int(message.text)
-        # Normalize: Telegram supergroup chat_ids are always negative (-100...)
-        # If user enters a positive number, prepend -100
         if chat_id > 0:
             chat_id = int(f"-100{chat_id}")
         elif chat_id < 0 and not str(chat_id).startswith("-100"):
             chat_id = int(f"-100{abs(chat_id)}")
-        await state.update_data(chat_id=chat_id)
-    else:
-        # If we already have chat_id, this is a custom department text input
-        data = await state.get_data()
-        if "chat_id" not in data:
-            await message.answer(
-                "Please forward a message from the target group or send the chat ID first."
-            )
+
+    if chat_id is not None:
+        try:
+            bot_member = await bot.get_chat_member(chat_id, bot.id)
+            if bot_member.status in ("left", "kicked"):
+                await message.answer("⚠️ I need to be a member of that group before you can set it up. Please add me first.", parse_mode=None)
+                return
+        except Exception:
+            await message.answer("⚠️ Could not verify group. Ensure the ID is correct and I have been added to the chat.", parse_mode=None)
             return
-        await state.update_data(department=message.text)
-        await state.set_state(SetupGroupStates.waiting_year)
-        await message.answer("📅 Select the academic year:", reply_markup=menus.year_select())
+
+        await state.update_data(chat_id=chat_id)
+        await message.answer(
+            f"✅ Group recognized: <code>{chat_id}</code>\n\nSelect a <b>department</b> or type a custom one:",
+            reply_markup=menus.department_select(),
+            parse_mode="HTML"
+        )
         return
 
-    await message.answer(
-        f"✅ Group registered: <code>{chat_id}</code>\n\nSelect a <b>department</b> or type a custom one:",
-        reply_markup=menus.department_select()
-    )
+    # If we already have chat_id, this is a custom department text input
+    data = await state.get_data()
+    if "chat_id" not in data:
+        await message.answer(
+            "Please forward a message from the target group or send the chat ID first."
+        )
+        return
+    await state.update_data(department=message.text)
+    await state.set_state(SetupGroupStates.waiting_year)
+    await message.answer("📅 Select the academic year:", reply_markup=menus.year_select())
+    return
 
 
 @router.callback_query(SetupGroupStates.waiting_department, F.data.startswith("dept:"))
@@ -82,7 +92,8 @@ async def setup_receive_dept_cb(callback: types.CallbackQuery, state: FSMContext
         await state.set_state(SetupGroupStates.waiting_year)
         await callback.message.edit_text(
             f"Department <b>{html.escape(dept)}</b> selected.\n\n📅 Select the academic year:", 
-            reply_markup=menus.year_select()
+            reply_markup=menus.year_select(),
+            parse_mode="HTML"
         )
     await callback.answer()
 
@@ -94,7 +105,8 @@ async def setup_receive_year(callback: types.CallbackQuery, state: FSMContext) -
     await state.update_data(year=year)
     await state.set_state(SetupGroupStates.waiting_section)
     await callback.message.edit_text(
-        f"Year <b>{year}</b> selected.\n\nNow enter the <b>section</b> (A, B, 1, 2, etc.):"
+        f"Year <b>{year}</b> selected.\n\nNow enter the <b>section</b> (A, B, 1, 2, etc.):",
+        parse_mode="HTML"
     )
     await callback.answer()
 
@@ -108,6 +120,7 @@ async def setup_receive_section(message: types.Message, state: FSMContext) -> No
     await message.answer(
         f"Section <b>{html.escape(section)}</b> set.\n\nSelect the current semester:",
         reply_markup=menus.semester_select(),
+        parse_mode="HTML"
     )
 
 
@@ -126,7 +139,38 @@ async def setup_receive_semester(
 
     # Create or update group
     existing = await crud.get_group_by_chat_id(session, chat_id)
+    user_id = callback.from_user.id
+    
     if existing:
+        user = await crud.get_user(session, user_id, existing.id)
+        has_permission = bool(user and user.role in ("owner", "dept_admin"))
+        
+        if not has_permission:
+            try:
+                member = await callback.bot.get_chat_member(chat_id, user_id)
+                if member.status in ("creator", "administrator"):
+                    has_permission = True
+                    if not user:
+                        await crud.create(
+                            session,
+                            User(
+                                telegram_user_id=user_id,
+                                group_id=existing.id,
+                                role="dept_admin",
+                                username=callback.from_user.username,
+                                full_name=callback.from_user.full_name,
+                            )
+                        )
+                    else:
+                        await crud.update_fields(session, User, user.id, role="dept_admin")
+            except Exception:
+                pass
+                
+        if not has_permission:
+            await callback.message.edit_text("❌ This group is already managed by someone else, and you lack administrative permissions to overwrite its settings.", reply_markup=menus.back_button())
+            await callback.answer()
+            return
+            
         await crud.update_fields(
             session,
             Group,
@@ -144,10 +188,6 @@ async def setup_receive_semester(
         group = await crud.create(session, group)
         group_id = group.id
 
-    # Ensure the configuring user is registered as owner
-    user_id = callback.from_user.id
-    user = await crud.get_user(session, user_id, group_id)
-    if not user:
         await crud.create(
             session,
             User(
@@ -176,6 +216,7 @@ async def setup_receive_semester(
         f"<code>Semester</code> {semester}\n\n"
         f"Next, add courses and link topics.",
         reply_markup=menus.back_button(),
+        parse_mode="HTML"
     )
     await callback.answer()
 

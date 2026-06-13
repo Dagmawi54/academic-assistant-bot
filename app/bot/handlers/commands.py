@@ -16,9 +16,10 @@ from app.utils.text import ResponseFormatter
 from app.services.intent_router import detect_intent
 
 import html
+import time
 
 router = Router(name="commands")
-_conversation_memory: dict[tuple[int, int | None, int], deque[dict[str, str]]] = defaultdict(lambda: deque(maxlen=6))
+_conversation_memory: dict[tuple[int, int | None, int], deque[tuple[float, dict[str, str]]]] = defaultdict(lambda: deque(maxlen=6))
 
 
 @router.message(Command("start"), StateFilter(any_state), F.chat.type == "private")
@@ -60,6 +61,16 @@ async def cmd_help(message: types.Message, state: FSMContext) -> None:
     await message.answer(text, parse_mode="HTML")
 
 
+@router.message(Command("menu"), StateFilter(any_state), F.chat.type.in_({"group", "supergroup"}))
+async def cmd_menu_group(message: types.Message, bot: Bot) -> None:
+    """Redirect group /menu commands to DMs."""
+    bot_info = await bot.me()
+    await message.answer(
+        f"⚙️ To manage the group, please use /menu in my DMs: @{bot_info.username}",
+        parse_mode=None
+    )
+
+
 @router.message(Command("menu"), StateFilter(any_state), F.chat.type == "private")
 async def cmd_menu(message: types.Message, state: FSMContext, session: AsyncSession) -> None:
     """Show admin menu (DM only)."""
@@ -68,10 +79,17 @@ async def cmd_menu(message: types.Message, state: FSMContext, session: AsyncSess
 
     if is_admin:
         managed = await crud.get_managed_groups(session, message.from_user.id)
-        group_names = ", ".join(html.escape(g.department) for g in managed if g.department) or "None"
+        if not managed:
+            text = "⚙️ <b>Admin Dashboard</b>\n\nYou are an admin, but you haven't fully set up any groups.\nClick below to register one!"
+        else:
+            text = "⚙️ <b>Admin Dashboard</b>\n\n<b>Your Registered Groups:</b>\n"
+            for g in managed:
+                text += f"• {html.escape(g.department or 'Unknown')} (Y{g.year or '?'} S{html.escape(g.section or '?')})\n"
+            text += "\nWhat would you like to manage?"
+            
         await message.answer(
-            f"⚙️ <b>Admin Menu</b>\n<i>Managing groups:</i> {group_names}",
-            reply_markup=menus.main_menu(),
+            text,
+            reply_markup=menus.main_menu(bool(managed)),
             parse_mode="HTML",
         )
         return
@@ -83,6 +101,20 @@ async def cmd_menu(message: types.Message, state: FSMContext, session: AsyncSess
         "If you just added me to a <b>new</b> group and want to become the owner to manage it, click below to set it up:"
     )
     await message.answer(text, reply_markup=menus.unregistered_menu(), parse_mode="HTML")
+
+
+@router.message(Command("cancel"), StateFilter(any_state), F.chat.type == "private")
+async def cmd_cancel(message: types.Message, state: FSMContext) -> None:
+    """Global escape hatch — clears any active FSM wizard."""
+    current = await state.get_state()
+    if current:
+        await state.clear()
+        await message.answer(
+            "✅ Cancelled. You can type freely or use /menu to start again.",
+            parse_mode=None,
+        )
+    else:
+        await message.answer("Nothing to cancel — you're not in any wizard.", parse_mode=None)
 
 
 @router.message(Command("status"), StateFilter(any_state))
@@ -253,9 +285,18 @@ async def cb_acceptance_mark(callback: types.CallbackQuery, session: AsyncSessio
 
 
 @router.callback_query(F.data == "menu:main")
-async def cb_main_menu(callback: types.CallbackQuery) -> None:
+async def cb_main_menu(callback: types.CallbackQuery, session: AsyncSession) -> None:
     """Return to main admin menu."""
-    await callback.message.edit_text("⚙️ <b>Admin Menu</b>", reply_markup=menus.main_menu(), parse_mode="HTML")
+    managed = await crud.get_managed_groups(session, callback.from_user.id)
+    if not managed:
+        text = "⚙️ <b>Admin Dashboard</b>\n\nYou don't have any registered groups yet.\nClick below to set one up!"
+    else:
+        text = "⚙️ <b>Admin Dashboard</b>\n\n<b>Your Registered Groups:</b>\n"
+        for g in managed:
+            text += f"• {html.escape(g.department or 'Unknown')} (Y{g.year or '?'} S{html.escape(g.section or '?')})\n"
+        text += "\nWhat would you like to manage?"
+        
+    await callback.message.edit_text(text, reply_markup=menus.main_menu(bool(managed)), parse_mode="HTML")
     await callback.answer()
 
 
@@ -378,7 +419,7 @@ async def _process_ask(
         user_content = f"{file_context}\n\nUser question: {query}"
 
     memory_key = _memory_key(message)
-    prior_turns = list(_conversation_memory[memory_key])
+    prior_turns = _get_history(memory_key)
 
     # Personality & formatting rules
     personality = (
@@ -453,9 +494,18 @@ def _memory_key(message: types.Message) -> tuple[int, int | None, int]:
     )
 
 
+def _get_history(key: tuple[int, int | None, int]) -> list[dict[str, str]]:
+    now = time.time()
+    queue = _conversation_memory[key]
+    while queue and now - queue[0][0] > 1800:
+        queue.popleft()
+    return [msg for _, msg in queue]
+
+
 def _remember_turn(key: tuple[int, int | None, int], user_content: str, answer_text: str) -> None:
-    _conversation_memory[key].append({"role": "user", "content": user_content[-2500:]})
-    _conversation_memory[key].append({"role": "assistant", "content": answer_text[-2500:]})
+    now = time.time()
+    _conversation_memory[key].append((now, {"role": "user", "content": user_content[-2500:]}))
+    _conversation_memory[key].append((now, {"role": "assistant", "content": answer_text[-2500:]}))
 
 
 async def _safe_delete(message: types.Message) -> None:
