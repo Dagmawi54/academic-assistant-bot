@@ -31,15 +31,18 @@ async def cmd_start(message: types.Message, state: FSMContext, session: AsyncSes
 
     if await is_admin_in_any_group(session, user_id):
         await message.answer(
-            f"👋 <b>Welcome, {name}</b>\n\nYou have admin access. Use the menu below to manage your groups.",
+            f"👋 <b>Welcome back, {name}!</b>\n\n"
+            f"<blockquote>🎓 You have admin access. Use the dashboard below to manage your groups, courses, and announcements.</blockquote>",
             reply_markup=menus.main_menu(),
             parse_mode="HTML",
         )
         return
 
     await message.answer(
-        f"👋 <b>Hi, {name}</b>\n\n"
-        "I'm the Academic Assistant Bot. I help manage course information, assignments, and reminders in your university group.\n\n"
+        f"👋 <b>Hey {name}!</b>\n\n"
+        "🎓 I'm <b>Dagi</b> — your Academic Assistant Bot.\n\n"
+        "<blockquote>💡 I help manage course info, assignments, exams, and reminders in your university group. "
+        "Just ask me anything — I explain things simply!</blockquote>\n\n"
         "If you're a group admin, add me to your group and use /menu here to configure.",
         parse_mode="HTML",
     )
@@ -50,13 +53,16 @@ async def cmd_help(message: types.Message, state: FSMContext) -> None:
     """Show available commands."""
     await state.clear()
     text = (
-        "<b>Available Commands</b>\n\n"
-        "<code>/start</code> - Start the bot\n"
-        "<code>/help</code> - Show this message\n"
-        "<code>/menu</code> - Open admin menu (DM only)\n"
-        "<code>/status</code> - Show group info\n"
-        "<code>/ask</code> - Ask the AI a question\n"
-        "<code>/sync_admin</code> - Sync your admin role (in group)"
+        "📖 <b>Available Commands</b>\n\n"
+        "<blockquote>"
+        "🏠 /start — Start the bot\n"
+        "❓ /help — Show this message\n"
+        "⚙️ /menu — Open admin dashboard (DM only)\n"
+        "📊 /status — Show group info\n"
+        "🤖 /ask — Ask Dagi anything\n"
+        "🔄 /sync_admin — Sync your admin role (in group)\n"
+        "🚫 /cancel — Exit any active wizard"
+        "</blockquote>"
     )
     await message.answer(text, parse_mode="HTML")
 
@@ -80,12 +86,17 @@ async def cmd_menu(message: types.Message, state: FSMContext, session: AsyncSess
     if is_admin:
         managed = await crud.get_managed_groups(session, message.from_user.id)
         if not managed:
-            text = "⚙️ <b>Admin Dashboard</b>\n\nYou are an admin, but you haven't fully set up any groups.\nClick below to register one!"
+            text = (
+                "⚙️ <b>Admin Dashboard</b>\n\n"
+                "<blockquote>📭 You're an admin, but no groups are fully set up yet. "
+                "Tap below to register your first group!</blockquote>"
+            )
         else:
-            text = "⚙️ <b>Admin Dashboard</b>\n\n<b>Your Registered Groups:</b>\n"
+            text = "⚙️ <b>Admin Dashboard</b>\n\n📋 <b>Your Groups:</b>\n\n"
             for g in managed:
-                text += f"• {html.escape(g.department or 'Unknown')} (Y{g.year or '?'} S{html.escape(g.section or '?')})\n"
-            text += "\nWhat would you like to manage?"
+                dept = html.escape(g.department or 'Unknown')
+                text += f"  🏫 <b>{dept}</b> · Year {g.year or '?'} · Section {html.escape(g.section or '?')}\n"
+            text += "\n<blockquote>👇 Choose what you'd like to manage below.</blockquote>"
             
         await message.answer(
             text,
@@ -131,12 +142,14 @@ async def cmd_status(message: types.Message, state: FSMContext, session: AsyncSe
     course_list = ", ".join(html.escape(c.course_name) for c in courses) or "None"
     text = (
         "📊 <b>Group Status</b>\n\n"
-        f"<code>Department</code> {html.escape(group.department or 'Not set')}\n"
-        f"<code>Year</code> {group.year or 'Not set'}\n"
-        f"<code>Section</code> {html.escape(group.section or 'Not set')}\n"
-        f"<code>Semester</code> {group.semester or 'Not set'}\n"
-        f"<code>Courses</code> {course_list}\n"
-        f"<code>Active</code> {'Yes' if group.active else 'No'}"
+        f"<blockquote>"
+        f"🏫 <b>Department:</b> {html.escape(group.department or 'Not set')}\n"
+        f"📅 <b>Year:</b> {group.year or 'Not set'}\n"
+        f"🔤 <b>Section:</b> {html.escape(group.section or 'Not set')}\n"
+        f"📚 <b>Semester:</b> {group.semester or 'Not set'}\n"
+        f"📝 <b>Courses:</b> {course_list}\n"
+        f"{'🟢' if group.active else '🔴'} <b>Active:</b> {'Yes' if group.active else 'No'}"
+        f"</blockquote>"
     )
     await message.answer(text, parse_mode="HTML")
 
@@ -289,12 +302,17 @@ async def cb_main_menu(callback: types.CallbackQuery, session: AsyncSession) -> 
     """Return to main admin menu."""
     managed = await crud.get_managed_groups(session, callback.from_user.id)
     if not managed:
-        text = "⚙️ <b>Admin Dashboard</b>\n\nYou don't have any registered groups yet.\nClick below to set one up!"
+        text = (
+            "⚙️ <b>Admin Dashboard</b>\n\n"
+            "<blockquote>📭 You don't have any registered groups yet. "
+            "Tap below to set one up!</blockquote>"
+        )
     else:
-        text = "⚙️ <b>Admin Dashboard</b>\n\n<b>Your Registered Groups:</b>\n"
+        text = "⚙️ <b>Admin Dashboard</b>\n\n📋 <b>Your Groups:</b>\n\n"
         for g in managed:
-            text += f"• {html.escape(g.department or 'Unknown')} (Y{g.year or '?'} S{html.escape(g.section or '?')})\n"
-        text += "\nWhat would you like to manage?"
+            dept = html.escape(g.department or 'Unknown')
+            text += f"  🏫 <b>{dept}</b> · Year {g.year or '?'} · Section {html.escape(g.section or '?')}\n"
+        text += "\n<blockquote>👇 Choose what you'd like to manage below.</blockquote>"
         
     await callback.message.edit_text(text, reply_markup=menus.main_menu(bool(managed)), parse_mode="HTML")
     await callback.answer()
@@ -432,7 +450,13 @@ async def _process_ask(
         "When someone asks an academic question, you become a focused tutor who explains clearly. "
         "You have personality — you can joke, empathize, and keep it real. "
         "You NEVER start with 'I'm an AI' disclaimers or generic intros like 'Great question!' "
-        "Keep responses concise and punchy unless depth is specifically needed."
+        "Keep responses concise and punchy unless depth is specifically needed.\n\n"
+        "EXPLANATION STYLE (CRITICAL):\n"
+        "When explaining concepts, ALWAYS explain as if talking to a 5-year-old first — use dead-simple analogies, "
+        "everyday comparisons, and vivid mini-stories. Then layer on the actual academic detail.\n"
+        "ALWAYS include at least one concrete, real-world example for every concept explained.\n"
+        "Use analogies like: 'Think of it like…', 'Imagine you have…', 'It's basically like when you…'\n"
+        "The goal: a 10-year-old should understand the first part, a university student should get the full picture."
     )
     
     formatting_rules = (
@@ -440,7 +464,9 @@ async def _process_ask(
         "1. NEVER use Markdown (no **, ##, *, etc). Only use HTML: <b>bold</b>, <i>italic</i>, <code>code</code>.\n"
         "2. For multi-line code, use <pre><code class=\"language-python\">...</code></pre>.\n"
         "3. Use bullet points (•) sparingly and only when listing genuinely helps.\n"
-        "4. BANNED: walls of text, excessive emojis, numbered lists for simple answers, generic AI intros."
+        "4. Use <blockquote>...</blockquote> to wrap key definitions, important takeaways, or summary boxes.\n"
+        "5. Use emojis naturally to make text scannable and engaging (📌 for key points, 💡 for tips, ⚠️ for warnings, 🎯 for examples).\n"
+        "6. BANNED: walls of text, excessive emojis, numbered lists for simple answers, generic AI intros."
     )
     
     sys_prompt = f"{personality}\n\n{formatting_rules}"
