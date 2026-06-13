@@ -464,7 +464,8 @@ async def _process_ask(
         "3. Use bullet points (•) sparingly and only when listing genuinely helps.\n"
         "4. Use <blockquote>...</blockquote> to wrap key definitions, important takeaways, or summary boxes.\n"
         "5. Use emojis naturally to make text scannable and engaging (📌 for key points, 💡 for tips, ⚠️ for warnings, 🎯 for examples).\n"
-        "6. BANNED: walls of text, excessive emojis, numbered lists for simple answers, generic AI intros."
+        "6. NO SELF-CORRECTION LOOPS: DO NOT write 'no, this is incorrect' or correct yourself mid-generation. Plan your math perfectly and only output the final, confident, correct steps without trial-and-error.\n"
+        "7. BANNED: walls of text, excessive emojis, numbered lists for simple answers, generic AI intros."
     )
     
     sys_prompt = f"{personality}\n\n{formatting_rules}"
