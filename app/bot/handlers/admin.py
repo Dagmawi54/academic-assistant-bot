@@ -700,9 +700,24 @@ async def cb_menu_metrics(callback: types.CallbackQuery) -> None:
     from app.metrics.tracker import tracker
 
     report = await tracker.get_report()
-    lines = ["📊 *System Metrics*:"]
+    lines = [
+        "🚀 <b>Academic Assistant Bot v1.1.0</b>",
+        "",
+        "📊 <b>System Metrics</b>:"
+    ]
     for k, v in report.items():
         lines.append(f"• {html.escape(k)}: {html.escape(str(v))}")
+    
+    lines.extend([
+        "",
+        "<b>Recent Updates:</b>",
+        "• OCR Image Extraction",
+        "• Document Extraction (PDF/DOCX)",
+        "• Voice Note Transcription",
+        "• Duplicate Semantic Detection",
+        "• Advanced Role Management & Audit Logs"
+    ])
+
     await callback.message.edit_text(
         "\n".join(lines), parse_mode="HTML", reply_markup=menus.back_button()
     )
@@ -1031,19 +1046,3 @@ async def cb_set_safety(callback: types.CallbackQuery, session: AsyncSession) ->
             await callback.message.edit_text("❌ Access Denied.", reply_markup=menus.back_button())
     await callback.answer()
 
-
-@router.callback_query(F.data == "menu:cmd_version")
-async def cb_menu_version(callback: types.CallbackQuery) -> None:
-    text = (
-        "🚀 <b>Academic Assistant Bot v1.1.0</b>\n\n"
-        "<b>Recent Updates:</b>\n"
-        "• OCR Image Extraction\n"
-        "• Document Extraction \\(PDF/DOCX\\)\n"
-        "• Voice Note Transcription\n"
-        "• Duplicate Semantic Detection\n"
-        "• Advanced Role Management & Audit Logs"
-    )
-    await callback.message.edit_text(
-        text, parse_mode="HTML", reply_markup=menus.back_button()
-    )
-    await callback.answer()

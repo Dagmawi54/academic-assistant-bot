@@ -45,12 +45,7 @@ def cat_courses() -> InlineKeyboardMarkup:
 
 def cat_communications() -> InlineKeyboardMarkup:
     buttons = [
-        [InlineKeyboardButton(text="Exam Coverage", callback_data="menu:exam_coverage")],
-        [
-            InlineKeyboardButton(text="AI Announcement", callback_data="menu:announcements"),
-            InlineKeyboardButton(text="Raw Broadcast", callback_data="menu:broadcast"),
-        ],
-        [InlineKeyboardButton(text="Targeted Course Push", callback_data="menu:targeted_push")],
+        [InlineKeyboardButton(text="📝 Send Announcement", callback_data="menu:announcements")],
         [InlineKeyboardButton(text="Back", callback_data="menu:main")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -75,8 +70,7 @@ def cat_analytics() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="Analytics Overview", callback_data="menu:analytics_overview")],
         [InlineKeyboardButton(text="Recent Logs", callback_data="menu:logs_recent")],
         [InlineKeyboardButton(text="View Audit Logs", callback_data="menu:audit")],
-        [InlineKeyboardButton(text="View System Metrics", callback_data="menu:metrics")],
-        [InlineKeyboardButton(text="Version Info", callback_data="menu:cmd_version")],
+        [InlineKeyboardButton(text="System Health & Version", callback_data="menu:metrics")],
         [InlineKeyboardButton(text="Back", callback_data="menu:main")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -85,18 +79,11 @@ def cat_analytics() -> InlineKeyboardMarkup:
 def cat_events() -> InlineKeyboardMarkup:
     buttons = [
         [InlineKeyboardButton(text="📅 Upcoming Events", callback_data="menu:events_upcoming")],
-        [
-            InlineKeyboardButton(text="📚 Exams", callback_data="menu:events_exams"),
-            InlineKeyboardButton(text="📝 Assignments", callback_data="menu:events_assignments"),
-            InlineKeyboardButton(text="❓ Quizzes", callback_data="menu:events_quizzes"),
-        ],
-        [
-            InlineKeyboardButton(text="⏰ Reminders", callback_data="menu:events_reminders"),
-            InlineKeyboardButton(text="📖 Coverage", callback_data="menu:events_coverage"),
-        ],
+        [InlineKeyboardButton(text="⏰ Scheduled Reminders", callback_data="menu:events_reminders")],
+        [InlineKeyboardButton(text="📖 Exam Coverage", callback_data="menu:events_coverage")],
         [
             InlineKeyboardButton(text="⚠️ Review Queue", callback_data="menu:events_review"),
-            InlineKeyboardButton(text="Recently Detected", callback_data="menu:events_recent"),
+            InlineKeyboardButton(text="🗑️ Duplicates", callback_data="menu:events_duplicates"),
         ],
         [InlineKeyboardButton(text="Back", callback_data="menu:main")],
     ]

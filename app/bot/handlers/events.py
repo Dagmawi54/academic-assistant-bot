@@ -155,40 +155,10 @@ async def cb_events_upcoming(callback: types.CallbackQuery, session: AsyncSessio
     await _render_upcoming_events(callback, session, page=0, item_types=None, title="Upcoming Events", refresh_prefix="events:upcoming")
 
 
-@router.callback_query(F.data == "menu:events_exams")
-async def cb_events_exams(callback: types.CallbackQuery, session: AsyncSession) -> None:
-    await _render_upcoming_events(callback, session, page=0, item_types=("exam",), title="Upcoming Exams", refresh_prefix="events:exams")
-
-
-@router.callback_query(F.data == "menu:events_assignments")
-async def cb_events_assignments(callback: types.CallbackQuery, session: AsyncSession) -> None:
-    await _render_upcoming_events(callback, session, page=0, item_types=("assignment",), title="Upcoming Assignments", refresh_prefix="events:assignments")
-
-
-@router.callback_query(F.data == "menu:events_quizzes")
-async def cb_events_quizzes(callback: types.CallbackQuery, session: AsyncSession) -> None:
-    await _render_upcoming_events(callback, session, page=0, item_types=("quiz",), title="Upcoming Quizzes", refresh_prefix="events:quizzes")
-
-
 @router.callback_query(F.data.startswith("events:upcoming:"))
 async def cb_events_upcoming_page(callback: types.CallbackQuery, session: AsyncSession) -> None:
     page = int(callback.data.rsplit(":", 1)[1])
     await _render_upcoming_events(callback, session, page=page, item_types=None, title="Upcoming Events", refresh_prefix="events:upcoming")
-
-
-@router.callback_query(F.data.startswith("events:exams:"))
-async def cb_events_exams_page(callback: types.CallbackQuery, session: AsyncSession) -> None:
-    await _render_upcoming_events(callback, session, page=int(callback.data.rsplit(":", 1)[1]), item_types=("exam",), title="Upcoming Exams", refresh_prefix="events:exams")
-
-
-@router.callback_query(F.data.startswith("events:assignments:"))
-async def cb_events_assignments_page(callback: types.CallbackQuery, session: AsyncSession) -> None:
-    await _render_upcoming_events(callback, session, page=int(callback.data.rsplit(":", 1)[1]), item_types=("assignment",), title="Upcoming Assignments", refresh_prefix="events:assignments")
-
-
-@router.callback_query(F.data.startswith("events:quizzes:"))
-async def cb_events_quizzes_page(callback: types.CallbackQuery, session: AsyncSession) -> None:
-    await _render_upcoming_events(callback, session, page=int(callback.data.rsplit(":", 1)[1]), item_types=("quiz",), title="Upcoming Quizzes", refresh_prefix="events:quizzes")
 
 
 async def _render_upcoming_events(
@@ -239,44 +209,6 @@ async def _render_upcoming_events(
     )
     await callback.answer()
 
-
-@router.callback_query(F.data == "menu:events_recent")
-async def cb_events_recent(callback: types.CallbackQuery, session: AsyncSession) -> None:
-    await _render_recent_events(callback, session, page=0)
-
-
-@router.callback_query(F.data.startswith("events:recent:"))
-async def cb_events_recent_page(callback: types.CallbackQuery, session: AsyncSession) -> None:
-    await _render_recent_events(callback, session, page=int(callback.data.rsplit(":", 1)[1]))
-
-
-async def _render_recent_events(callback: types.CallbackQuery, session: AsyncSession, page: int) -> None:
-    group = await _get_admin_group(session, callback.from_user.id)
-    if not group:
-        await callback.answer("No active group.", show_alert=True)
-        return
-    per_page = 10
-    items = await event_service.get_recent_items(session, group.id, limit=per_page, offset=page * per_page)
-    if not items:
-        await callback.message.edit_text(
-            "<b>Recently Detected</b>\n\nNo academic items have been detected yet.",
-            reply_markup=_section_nav("menu:events_recent"),
-            parse_mode="HTML",
-        )
-        await callback.answer()
-        return
-    text = "<b>Recently Detected</b>\n\n"
-    for item in items:
-        course = item.course.course_name if item.course else "No course"
-        detected = item.created_at.strftime("%Y-%m-%d %H:%M") if item.created_at else "Unknown"
-        text += f"- <b>#{item.id} {html.escape(item.item_type.title())}</b> · {html.escape(course)}\n"
-        text += f"  {html.escape(item.title or 'Untitled')} · <code>{detected}</code>\n"
-    await callback.message.edit_text(
-        text,
-        reply_markup=_items_markup(items, back_data="menu:cat_events", refresh_data=f"events:recent:{page}"),
-        parse_mode="HTML",
-    )
-    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("events:item:"))
