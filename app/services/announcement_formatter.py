@@ -7,7 +7,6 @@ import re
 
 from app.utils.text import sanitize_telegram_html
 
-_URGENT_WORDS = ("urgent", "important", "deadline", "exam", "assignment", "tomorrow", "today")
 _DATE_PATTERN = re.compile(
     r"\b("
     r"monday|tuesday|wednesday|thursday|friday|saturday|sunday|"
@@ -18,36 +17,49 @@ _DATE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+_GRAMMAR_REPLACEMENTS = (
+    (re.compile(r"\bdont\b", re.IGNORECASE), "don't"),
+    (re.compile(r"\bcant\b", re.IGNORECASE), "can't"),
+    (re.compile(r"\bwont\b", re.IGNORECASE), "won't"),
+    (re.compile(r"\bisnt\b", re.IGNORECASE), "isn't"),
+    (re.compile(r"\barent\b", re.IGNORECASE), "aren't"),
+    (re.compile(r"\bdidnt\b", re.IGNORECASE), "didn't"),
+    (re.compile(r"\bdoesnt\b", re.IGNORECASE), "doesn't"),
+    (re.compile(r"\btmrw\b", re.IGNORECASE), "tomorrow"),
+)
+
 
 def _highlight_dates(text: str) -> str:
-    return _DATE_PATTERN.sub(lambda m: f"<b>{html.escape(m.group(0))}</b>", text)
+    return _DATE_PATTERN.sub(lambda match: f"<b>{html.escape(match.group(0))}</b>", text)
+
+
+def _polish_line(text: str) -> str:
+    line = re.sub(r"\s+", " ", text.strip())
+    for pattern, replacement in _GRAMMAR_REPLACEMENTS:
+        line = pattern.sub(replacement, line)
+    line = re.sub(r"\bi\b", "I", line)
+    line = re.sub(r"\s+([,.;:!?])", r"\1", line)
+    if line:
+        line = line[0].upper() + line[1:]
+    if line and line[-1] not in ".!?":
+        line += "."
+    return line
 
 
 def format_announcement_html(text: str) -> str:
-    """Convert plain admin text into clean Telegram HTML."""
+    """Lightly polish plain admin text into natural Telegram HTML."""
     normalized = "\n".join(line.strip() for line in text.strip().splitlines() if line.strip())
     if not normalized:
-        return "<b>Announcement</b>"
-
-    title = "Announcement"
-    lower = normalized.lower()
-    if any(word in lower for word in ("exam", "quiz", "mid", "final")):
-        title = "Exam Update"
-    elif any(word in lower for word in ("assignment", "homework", "project", "submission")):
-        title = "Assignment Update"
-
-    icon = "📢"
-    if any(word in lower for word in _URGENT_WORDS):
-        icon = "⚠️"
+        return "Announcement."
 
     lines = []
     for raw_line in normalized.splitlines():
-        line = html.escape(raw_line)
+        bullet = re.match(r"^[-*\u2022]\s*(.+)$", raw_line)
+        line_text = bullet.group(1) if bullet else raw_line
+        line = html.escape(_polish_line(line_text), quote=False)
         line = _highlight_dates(line)
-        if raw_line.startswith(("-", "*", "•")):
-            line = f"• {line.lstrip('-*• ').strip()}"
+        if bullet:
+            line = f"- {line}"
         lines.append(line)
 
-    body = "\n".join(lines)
-    formatted = f"<b>{icon} {title}</b>\n\n{body}"
-    return sanitize_telegram_html(formatted)
+    return sanitize_telegram_html("\n".join(lines))

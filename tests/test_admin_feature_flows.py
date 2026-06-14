@@ -318,6 +318,16 @@ def test_announcement_formatter_highlights_urgency_and_dates():
     assert "assignment" in formatted.lower()
 
 
+def test_announcement_formatter_lightly_polishes_plain_notice():
+    from app.services.announcement_formatter import format_announcement_html
+
+    formatted = format_announcement_html("we dont have class tomorrow")
+
+    assert "We don't have class <b>tomorrow</b>." in formatted
+    assert "AI" not in formatted
+    assert "professionally" not in formatted.lower()
+
+
 @pytest.mark.asyncio
 async def test_document_extraction_helpers(monkeypatch):
     """Test the document extraction helper mapping."""

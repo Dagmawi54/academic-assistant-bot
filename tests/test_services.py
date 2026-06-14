@@ -267,6 +267,7 @@ async def test_topic_context_assignment_creates_item_reminders_and_ack(monkeypat
     assert sent_messages
     assert sent_messages[0]["message_thread_id"] == 84
     assert "Assignment deadline recorded" in sent_messages[0]["text"]
+    assert f"{len(reminders)} reminder" in sent_messages[0]["text"]
     assert "Confidence" not in sent_messages[0]["text"]
 
 

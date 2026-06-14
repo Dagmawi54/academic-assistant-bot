@@ -124,7 +124,7 @@ async def cb_set_announcement_scope(callback: types.CallbackQuery, state: FSMCon
     await state.set_state(AnnouncementStates.waiting_content)
     target_lines = "\n".join(f"â€¢ {html.escape(topic.topic_name)}" for topic in targets)
     await callback.message.edit_text(
-        f"<b>Targets</b>\n{target_lines}\n\nSend the AI announcement text or media. It will be professionally formatted.",
+        f"<b>Targets</b>\n{target_lines}\n\nSend the announcement text or media. Text will be lightly cleaned before posting.",
         reply_markup=menus.cancel_button(),
         parse_mode="HTML",
     )
@@ -145,7 +145,7 @@ async def cb_announcement_targets_done(callback: types.CallbackQuery, state: FSM
     )
     await state.set_state(AnnouncementStates.waiting_content)
     target_lines = "\n".join(f"• {html.escape(topic.topic_name)}" for topic in targets)
-    prompt = "Send the AI announcement text or media. It will be professionally formatted."
+    prompt = "Send the announcement text or media. Text will be lightly cleaned before posting."
     await callback.message.edit_text(
         f"<b>Targets</b>\n{target_lines}\n\n{prompt}",
         reply_markup=menus.cancel_button(),
@@ -207,7 +207,7 @@ async def receive_content(message: types.Message, state: FSMContext) -> None:
     )
     data = await state.get_data()
     target_type = data["target_type"]
-    action = "AI announcement" if target_type == "announcement" else ("raw broadcast" if target_type == "broadcast" else "push")
+    action = "announcement" if target_type == "announcement" else ("raw broadcast" if target_type == "broadcast" else "push")
     target_names = data.get("target_names") or ["Selected topic"]
     preview = "\n".join(f"• {html.escape(name)}" for name in target_names)
 

@@ -187,6 +187,7 @@ async def _process_group_message_inner(
 
     # 5. Create academic item for ANY academic type (not just those with deadlines)
     item = None
+    reminder_count = 0
     if classification.message_type in ACADEMIC_TYPES:
         course = topic_context.course
         if not course and classification.course_hint:
@@ -291,6 +292,7 @@ async def _process_group_message_inner(
             from app.services.reminder_service import create_reminders_for_item_in_session
 
             reminders = await create_reminders_for_item_in_session(session, item)
+            reminder_count = len(reminders)
             await _log_event_pipeline_snapshot(
                 session,
                 phase="reminders_created",
@@ -313,7 +315,7 @@ async def _process_group_message_inner(
 
     # 6. Send detection feedback to the SOURCE topic (visible acknowledgment)
     if item:
-        feedback = _build_detection_feedback(classification, item)
+        feedback = _build_detection_feedback(classification, item, reminder_count=reminder_count)
         try:
             await bot.send_message(
                 chat_id=chat_id,
@@ -388,7 +390,7 @@ def _build_contextual_title(message_type: str, course_name: str) -> str | None:
     return f"{course_name} - {label}" if label else None
 
 
-def _build_detection_feedback(classification: ClassificationResult, item: AcademicItem) -> str:
+def _build_detection_feedback_legacy(classification: ClassificationResult, item: AcademicItem) -> str:
     """Build a visible detection feedback message for the source topic."""
     when = ""
     if classification.deadline:
@@ -409,6 +411,93 @@ def _build_detection_feedback(classification: ClassificationResult, item: Academ
     return "📌 <b>Academic item recorded.</b>"
 
 
+
+
+def _build_detection_feedback_encoded(
+    classification: ClassificationResult,
+    item: AcademicItem,
+    *,
+    reminder_count: int = 0,
+) -> str:
+    """Build visible detection feedback with the actual scheduled reminder count."""
+    when = ""
+    if classification.deadline:
+        from app.utils.timezone import to_addis
+
+        when = f" for {to_addis(classification.deadline).strftime('%A')}"
+
+    reminder_line = _reminder_feedback(reminder_count) if item.deadline else ""
+
+    if classification.message_type == "ASSIGNMENT":
+        return (
+            f"ðŸ“Œ <b>Assignment deadline recorded.</b>{reminder_line}"
+            if item.deadline
+            else "ðŸ“Œ <b>Assignment recorded.</b>"
+        )
+    if classification.message_type == "QUIZ":
+        return (
+            f"ðŸ“Œ <b>Quiz added{when}.</b>{reminder_line}"
+            if item.deadline
+            else "ðŸ“Œ <b>Quiz added.</b>"
+        )
+    if classification.message_type == "EXAM":
+        return (
+            f"ðŸ“Œ <b>Exam added{when}.</b>{reminder_line}"
+            if item.deadline
+            else "ðŸ“Œ <b>Exam added.</b>"
+        )
+    if classification.message_type == "EXAM_COVERAGE":
+        return "ðŸ“Œ <b>Coverage updated.</b>"
+    if classification.message_type == "SCHEDULE_UPDATE":
+        return "ðŸ“Œ <b>Schedule update recorded.</b>"
+    return "ðŸ“Œ <b>Academic item recorded.</b>"
+
+
+def _reminder_feedback(reminder_count: int) -> str:
+    if reminder_count <= 0:
+        return "\nNo future reminders could be scheduled."
+    label = "reminder" if reminder_count == 1 else "reminders"
+    return f"\n{reminder_count} {label} scheduled."
+
+
+def _build_detection_feedback(
+    classification: ClassificationResult,
+    item: AcademicItem,
+    *,
+    reminder_count: int = 0,
+) -> str:
+    """Build visible detection feedback with the actual scheduled reminder count."""
+    when = ""
+    if classification.deadline:
+        from app.utils.timezone import to_addis
+
+        when = f" for {to_addis(classification.deadline).strftime('%A')}"
+
+    reminder_line = _reminder_feedback(reminder_count) if item.deadline else ""
+
+    if classification.message_type == "ASSIGNMENT":
+        return (
+            f"<b>Assignment deadline recorded.</b>{reminder_line}"
+            if item.deadline
+            else "<b>Assignment recorded.</b>"
+        )
+    if classification.message_type == "QUIZ":
+        return (
+            f"<b>Quiz added{when}.</b>{reminder_line}"
+            if item.deadline
+            else "<b>Quiz added.</b>"
+        )
+    if classification.message_type == "EXAM":
+        return (
+            f"<b>Exam added{when}.</b>{reminder_line}"
+            if item.deadline
+            else "<b>Exam added.</b>"
+        )
+    if classification.message_type == "EXAM_COVERAGE":
+        return "<b>Coverage updated.</b>"
+    if classification.message_type == "SCHEDULE_UPDATE":
+        return "<b>Schedule update recorded.</b>"
+    return "<b>Academic item recorded.</b>"
 
 
 async def _try_ai_extraction(text: str) -> dict | None:
