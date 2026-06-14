@@ -143,7 +143,7 @@ async def cb_cat_events(callback: types.CallbackQuery) -> None:
     """Show the events management menu."""
     await callback.message.edit_text(
         "<b>Events Dashboard</b>\n\n"
-        "View extracted events, reminders, scheduler jobs, low-confidence items, and duplicates.",
+        "View extracted events, reminders, missing dates, low-confidence items, and duplicates.",
         reply_markup=cat_events(),
         parse_mode="HTML",
     )
@@ -159,6 +159,44 @@ async def cb_events_upcoming(callback: types.CallbackQuery, session: AsyncSessio
 async def cb_events_upcoming_page(callback: types.CallbackQuery, session: AsyncSession) -> None:
     page = int(callback.data.rsplit(":", 1)[1])
     await _render_upcoming_events(callback, session, page=page, item_types=None, title="Upcoming Events", refresh_prefix="events:upcoming")
+
+
+@router.callback_query(F.data == "menu:events_missing_dates")
+async def cb_events_missing_dates(callback: types.CallbackQuery, session: AsyncSession) -> None:
+    group = await _get_admin_group(session, callback.from_user.id)
+    if not group:
+        await callback.answer("No active group.", show_alert=True)
+        return
+
+    items = await event_service.get_items_missing_deadlines(session, group.id)
+    if not items:
+        await callback.message.edit_text(
+            "<b>Needs Date</b>\n\nNo assignments, exams, or quizzes are missing dates.",
+            reply_markup=_section_nav("menu:events_missing_dates"),
+            parse_mode="HTML",
+        )
+        await callback.answer()
+        return
+
+    text = "<b>Needs Date</b>\n\nThese were detected, but no usable deadline was found.\n\n"
+    for item in items:
+        course = item.course.course_name if item.course else "Unknown Course"
+        source = f" | <a href='{item.source_message_link}'>Source</a>" if item.source_message_link else ""
+        text += f"- <b>#{item.id} {html.escape(item.title or item.item_type.title())}</b>\n"
+        text += f"  Course: {html.escape(course)}\n"
+        text += f"  Text: {html.escape((item.raw_text or 'Unavailable')[:120])}{source}\n\n"
+
+    await callback.message.edit_text(
+        text,
+        reply_markup=_items_markup(
+            items,
+            back_data="menu:cat_events",
+            refresh_data="menu:events_missing_dates",
+        ),
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+    )
+    await callback.answer()
 
 
 async def _render_upcoming_events(

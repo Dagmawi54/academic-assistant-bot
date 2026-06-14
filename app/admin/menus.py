@@ -280,3 +280,19 @@ def back_button() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[[InlineKeyboardButton(text="Back to Menu", callback_data="menu:main")]]
     )
+
+
+def cat_events() -> InlineKeyboardMarkup:
+    """Events dashboard menu."""
+    buttons = [
+        [InlineKeyboardButton(text="Upcoming Events", callback_data="menu:events_upcoming")],
+        [InlineKeyboardButton(text="Scheduled Reminders", callback_data="menu:events_reminders")],
+        [InlineKeyboardButton(text="Exam Coverage", callback_data="menu:events_coverage")],
+        [InlineKeyboardButton(text="Needs Date", callback_data="menu:events_missing_dates")],
+        [
+            InlineKeyboardButton(text="Review Queue", callback_data="menu:events_review"),
+            InlineKeyboardButton(text="Duplicates", callback_data="menu:events_duplicates"),
+        ],
+        [InlineKeyboardButton(text="Back", callback_data="menu:main")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)

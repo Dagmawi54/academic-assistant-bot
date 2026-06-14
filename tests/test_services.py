@@ -271,6 +271,71 @@ async def test_topic_context_assignment_creates_item_reminders_and_ack(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_relative_deadline_assignment_creates_reminders(monkeypatch):
+    """Relative quantity deadlines should become real deadlines and reminders."""
+    from app.services.routing_service import process_group_message
+    from tests.conftest import TestSessionFactory
+
+    sent_messages = []
+
+    async def fake_send_message(**kwargs):
+        sent_messages.append(kwargs)
+
+    monkeypatch.setattr("app.services.routing_service.bot.send_message", fake_send_message)
+
+    async def fake_ai_extraction(text):
+        return None
+
+    monkeypatch.setattr("app.services.routing_service._try_ai_extraction", fake_ai_extraction)
+
+    async with TestSessionFactory() as db:
+        async with db.begin():
+            group = await crud.create(db, Group(chat_id=-100334, semester=1, active=True))
+            topic = await crud.create(
+                db,
+                Topic(
+                    group_id=group.id,
+                    chat_id=group.chat_id,
+                    message_thread_id=85,
+                    topic_name="Software Engineering",
+                    topic_type="course",
+                    status="active",
+                ),
+            )
+            course = await crud.create(
+                db,
+                Course(
+                    group_id=group.id,
+                    course_name="Software Engineering",
+                    semester=1,
+                    topic_id=topic.id,
+                    active=True,
+                ),
+            )
+
+            await process_group_message(
+                session=db,
+                chat_id=group.chat_id,
+                thread_id=topic.message_thread_id,
+                text="assignment due 3 weeks from now",
+                user_id=123,
+                message_id=780,
+            )
+
+            items = await crud.get_all(db, AcademicItem, group_id=group.id)
+            reminders = await crud.get_all(db, Reminder)
+
+    assert len(items) == 1
+    assert items[0].item_type == "assignment"
+    assert items[0].course_id == course.id
+    assert items[0].deadline is not None
+    assert reminders
+    assert all(r.thread_id == 85 for r in reminders)
+    assert sent_messages
+    assert "Assignment deadline recorded" in sent_messages[0]["text"]
+
+
+@pytest.mark.asyncio
 async def test_exact_exam_on_tuesday_pipeline_logs_item_reminders_and_ack(monkeypatch):
     """The live-critical short exam phrase should traverse the full Academic OS path."""
     from app.services.routing_service import process_group_message

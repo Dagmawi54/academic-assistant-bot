@@ -267,14 +267,20 @@ def _extract_date(text: str) -> datetime | None:
         "fri": 4, "sat": 5, "sun": 6,
     }
 
-    if "tomorrow" in lower or "nege" in lower:
-        return now + timedelta(days=1)
     if "day after tomorrow" in lower or "kenege wodiya" in lower:
         return now + timedelta(days=2)
+    if "tomorrow" in lower or "nege" in lower:
+        return now + timedelta(days=1)
     if "today" in lower or "zare" in lower or "zarem" in lower:
         return now
     if "next week" in lower:
         return now + timedelta(days=7)
+    if "next month" in lower:
+        return now + timedelta(days=30)
+
+    relative_quantity = _extract_relative_quantity_date(lower, now)
+    if relative_quantity:
+        return relative_quantity
 
     # Match day names: "on monday", "this friday", "next tuesday"
     day_match = re.search(
@@ -299,6 +305,49 @@ def _extract_date(text: str) -> datetime | None:
                 return dateparser.parse(match.group(1), fuzzy=True)
             except (ValueError, TypeError):
                 continue
+    return None
+
+
+def _extract_relative_quantity_date(text: str, now: datetime) -> datetime | None:
+    """Extract phrases like 'in 3 weeks', 'after two days', or '3 weeks from now'."""
+    number_words = {
+        "one": 1,
+        "a": 1,
+        "an": 1,
+        "two": 2,
+        "three": 3,
+        "four": 4,
+        "five": 5,
+        "six": 6,
+        "seven": 7,
+        "eight": 8,
+        "nine": 9,
+        "ten": 10,
+        "eleven": 11,
+        "twelve": 12,
+    }
+    number_pattern = r"\d+|one|a|an|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve"
+    pattern = re.compile(
+        rf"\b(?:in|after|due\s+in|due\s+after|due)?\s*({number_pattern})\s+"
+        r"(day|days|week|weeks|month|months)\s*(?:from\s+now|later)?\b",
+        re.IGNORECASE,
+    )
+    match = pattern.search(text)
+    if not match:
+        return None
+
+    raw_amount = match.group(1).lower()
+    amount = int(raw_amount) if raw_amount.isdigit() else number_words.get(raw_amount)
+    if not amount:
+        return None
+
+    unit = match.group(2).lower()
+    if unit.startswith("day"):
+        return now + timedelta(days=amount)
+    if unit.startswith("week"):
+        return now + timedelta(weeks=amount)
+    if unit.startswith("month"):
+        return now + timedelta(days=30 * amount)
     return None
 
 

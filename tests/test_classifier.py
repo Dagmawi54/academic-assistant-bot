@@ -62,6 +62,18 @@ class TestEntityExtraction:
         assert result.deadline is not None
         assert result.deadline.month == 5
 
+    def test_relative_quantity_date_extraction(self):
+        result = classify("assignment due 3 weeks from now")
+        assert result.deadline is not None
+        delta = result.deadline - datetime.now()
+        assert 20 <= delta.days <= 21
+
+    def test_relative_quantity_word_date_extraction(self):
+        result = classify("quiz after two days")
+        assert result.deadline is not None
+        delta = result.deadline - datetime.now()
+        assert 1 <= delta.days <= 2
+
     def test_room_extraction(self):
         result = classify("Exam in room 302")
         assert result.room == "302"

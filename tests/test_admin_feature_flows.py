@@ -204,6 +204,76 @@ async def test_announcement_target_resolution_scopes_topics(session):
 
 
 @pytest.mark.asyncio
+async def test_general_announcement_target_goes_directly_to_content(session):
+    from app.admin.states import AnnouncementStates
+    from app.bot.handlers.communications import cb_set_announcement_scope
+
+    group = await crud.create(session, Group(chat_id=-100780, department="Science", active=True))
+    general = await crud.create(
+        session,
+        Topic(
+            group_id=group.id,
+            chat_id=group.chat_id,
+            message_thread_id=1,
+            topic_name="General",
+            topic_type="general",
+            status="active",
+        ),
+    )
+
+    state = DummyState()
+    await state.update_data(group_id=group.id, target_type="announcement")
+    callback = DummyCallback("ann:target_general")
+
+    await cb_set_announcement_scope(callback, state, session)
+
+    assert state.current_state == AnnouncementStates.waiting_content
+    assert state.data["target_topic_ids"] == [general.id]
+    assert state.data["target_names"] == ["General"]
+    assert "Targets" in callback.message.edits[-1]["text"]
+
+
+@pytest.mark.asyncio
+async def test_event_service_lists_items_missing_deadlines(session):
+    from app.services.event_service import get_items_missing_deadlines
+
+    group = await crud.create(session, Group(chat_id=-100781, department="Math", active=True))
+    missing = await crud.create(
+        session,
+        AcademicItem(
+            group_id=group.id,
+            item_type="assignment",
+            title="Ambiguous Assignment",
+            status="new",
+            raw_text="assignment due in a few weeks",
+        ),
+    )
+    await crud.create(
+        session,
+        AcademicItem(
+            group_id=group.id,
+            item_type="assignment",
+            title="Scheduled Assignment",
+            status="active",
+            deadline=missing.created_at,
+        ),
+    )
+    await crud.create(
+        session,
+        AcademicItem(
+            group_id=group.id,
+            item_type="exam_coverage",
+            title="Coverage Without Deadline",
+            status="active",
+        ),
+    )
+
+    items = await get_items_missing_deadlines(session, group.id)
+
+    assert [item.id for item in items] == [missing.id]
+
+
+@pytest.mark.asyncio
 async def test_duplicate_details_render_single_record(session):
     from app.services.event_service import get_duplicate_detail
 

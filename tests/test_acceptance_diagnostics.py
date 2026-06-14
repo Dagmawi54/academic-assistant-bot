@@ -133,16 +133,16 @@ async def test_callback_trace_middleware_persists_failure_and_stops_spinner(monk
     assert "callback_failed" in phases
 
 
-def test_communications_menu_uses_ai_announcement_and_raw_broadcast_labels():
+def test_communications_menu_uses_simplified_announcement_entrypoint():
     from app.admin.menus import communications_menu, main_menu
 
     main_text = [button.text for row in main_menu().inline_keyboard for button in row]
     comm_text = [button.text for row in communications_menu().inline_keyboard for button in row]
 
-    assert "Raw Broadcast" in main_text
-    assert "AI Announcement" in comm_text
-    assert "Raw Broadcast" in comm_text
-    assert "Announcements" not in comm_text
+    assert any("Broadcasts" in text or "Announcements" in text for text in main_text)
+    assert any("Announcement" in text for text in comm_text)
+    assert "Raw Broadcast" not in main_text
+    assert "Raw Broadcast" not in comm_text
     assert "Direct Broadcast" not in comm_text
 
 

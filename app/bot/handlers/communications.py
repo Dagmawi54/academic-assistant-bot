@@ -106,19 +106,29 @@ async def cb_toggle_announcement_course(callback: types.CallbackQuery, state: FS
 async def cb_set_announcement_scope(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
     data = await state.get_data()
     scope = "general" if callback.data == "ann:target_general" else "global"
-    courses = await crud.get_active_courses(session, data["group_id"])
     await state.update_data(
         target_scope=scope,
         selected_course_ids=[],
         target_topic_ids=[],
         target_names=["General"] if scope == "general" else ["Global: all configured topics"],
     )
+    targets = await _resolve_announcement_targets(session, await state.get_data())
+    if not targets:
+        await callback.answer("No valid target topics found.", show_alert=True)
+        return
+
+    await state.update_data(
+        target_topic_ids=[topic.id for topic in targets],
+        target_names=[topic.topic_name for topic in targets],
+    )
+    await state.set_state(AnnouncementStates.waiting_content)
+    target_lines = "\n".join(f"â€¢ {html.escape(topic.topic_name)}" for topic in targets)
     await callback.message.edit_text(
-        f"<b>Announcement Targets</b>\n\nSelected scope: <b>{scope.title()}</b>",
-        reply_markup=menus.announcement_target_select(courses),
+        f"<b>Targets</b>\n{target_lines}\n\nSend the AI announcement text or media. It will be professionally formatted.",
+        reply_markup=menus.cancel_button(),
         parse_mode="HTML",
     )
-    await callback.answer(f"{scope.title()} selected.")
+    await callback.answer(f"{scope.title()} target ready.")
 
 
 @router.callback_query(AnnouncementStates.waiting_destination, F.data == "ann:targets_done")
@@ -142,6 +152,40 @@ async def cb_announcement_targets_done(callback: types.CallbackQuery, state: FSM
         parse_mode="HTML",
     )
     await callback.answer("Targets ready.")
+
+
+@router.callback_query(AnnouncementStates.waiting_destination, F.data.startswith("course:"))
+async def cb_select_course(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
+    """Legacy targeted-push course selector; resolves the selected course to its topic."""
+    course_id = int(callback.data.split(":", 1)[1])
+    course = await crud.get_by_id(session, Course, course_id)
+    if not course:
+        await callback.answer("Course not found.", show_alert=True)
+        return
+    if not course.topic_id:
+        await callback.answer("This course is not linked to a topic.", show_alert=True)
+        return
+
+    topic = await crud.get_by_id(session, Topic, course.topic_id)
+    if not topic or topic.status != "active":
+        await callback.answer("Linked topic is not active.", show_alert=True)
+        return
+
+    await state.update_data(
+        group_id=course.group_id,
+        course_id=course.id,
+        topic_id=topic.id,
+        target_type="targeted",
+        target_topic_ids=[topic.id],
+        target_names=[topic.topic_name],
+    )
+    await state.set_state(AnnouncementStates.waiting_content)
+    await callback.message.edit_text(
+        f"<b>Targeting</b>\n{html.escape(topic.topic_name)}\n\nSend the message to post.",
+        reply_markup=menus.cancel_button(),
+        parse_mode="HTML",
+    )
+    await callback.answer("Course selected.")
 
 
 @router.message(AnnouncementStates.waiting_content, F.chat.type == "private")

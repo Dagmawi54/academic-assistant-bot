@@ -153,6 +153,26 @@ async def get_low_confidence_items(session: AsyncSession, group_id: int) -> Sequ
     return result.scalars().all()
 
 
+async def get_items_missing_deadlines(session: AsyncSession, group_id: int) -> Sequence[AcademicItem]:
+    """Get deadline-based academic items that were detected without a usable date."""
+    stmt = (
+        select(AcademicItem)
+        .options(selectinload(AcademicItem.course).selectinload(Course.topic))
+        .where(
+            and_(
+                AcademicItem.group_id == group_id,
+                AcademicItem.item_type.in_(("assignment", "exam", "quiz")),
+                AcademicItem.deadline.is_(None),
+                AcademicItem.status.in_(("new", "active", "verified")),
+            )
+        )
+        .order_by(desc(AcademicItem.created_at))
+        .limit(20)
+    )
+    result = await session.execute(stmt)
+    return result.scalars().all()
+
+
 async def get_suppressed_duplicates(session: AsyncSession, group_id: int) -> Sequence[DuplicateLog]:
     """Get logged suppressions with reasons."""
     stmt = (
