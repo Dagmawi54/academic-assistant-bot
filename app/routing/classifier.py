@@ -155,6 +155,13 @@ def classify(text: str) -> ClassificationResult:
     deadline = _extract_date(normalized)
     room = _extract_room(normalized)
 
+    if not deadline and _is_academic_lookup_question(lower):
+        return ClassificationResult(
+            message_type="DISCUSSION",
+            confidence=0.95,
+            course_hint=course_hint,
+        )
+
     # Score each category
     scores: dict[str, float] = {
         "ASSIGNMENT": _score_keywords(lower, ASSIGNMENT_KEYWORDS),
@@ -252,6 +259,32 @@ def _extract_course(text: str) -> str | None:
     """Extract a course name hint from text."""
     match = COURSE_PATTERNS.search(text)
     return match.group(0).strip() if match else None
+
+
+def _is_academic_lookup_question(text: str) -> bool:
+    """Detect questions asking about an existing academic item, not announcing one."""
+    has_academic_word = any(
+        word in text
+        for word in (
+            "exam",
+            "quiz",
+            "assignment",
+            "homework",
+            "deadline",
+            "midterm",
+            "final",
+        )
+    )
+    if not has_academic_word:
+        return False
+
+    return bool(
+        re.search(
+            r"\b(when|what\s+time|which\s+day|do\s+we\s+have|is\s+there|"
+            r"anyone\s+know|does\s+anyone\s+know)\b",
+            text,
+        )
+    )
 
 
 def _extract_date(text: str) -> datetime | None:

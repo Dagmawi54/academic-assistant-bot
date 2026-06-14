@@ -402,3 +402,61 @@ async def test_exact_exam_on_tuesday_pipeline_logs_item_reminders_and_ack(monkey
     assert "Exam added" in sent_messages[0]["text"]
     assert "Confidence" not in sent_messages[0]["text"]
 
+
+@pytest.mark.asyncio
+async def test_academic_lookup_question_does_not_create_item(monkeypatch):
+    """Questions like 'when is the exam' should not be recorded as new events."""
+    from app.services.routing_service import process_group_message
+    from tests.conftest import TestSessionFactory
+
+    sent_messages = []
+
+    async def fake_send_message(**kwargs):
+        sent_messages.append(kwargs)
+
+    monkeypatch.setattr("app.services.routing_service.bot.send_message", fake_send_message)
+
+    async def fake_ai_extraction(text):
+        raise AssertionError("Lookup questions should be dropped before AI extraction")
+
+    monkeypatch.setattr("app.services.routing_service._try_ai_extraction", fake_ai_extraction)
+
+    async with TestSessionFactory() as db:
+        async with db.begin():
+            group = await crud.create(db, Group(chat_id=-100445, semester=1, active=True))
+            topic = await crud.create(
+                db,
+                Topic(
+                    group_id=group.id,
+                    chat_id=group.chat_id,
+                    message_thread_id=100,
+                    topic_name="Mathematics",
+                    topic_type="course",
+                    status="active",
+                ),
+            )
+            await crud.create(
+                db,
+                Course(
+                    group_id=group.id,
+                    course_name="Mathematics",
+                    semester=1,
+                    topic_id=topic.id,
+                    active=True,
+                ),
+            )
+
+            await process_group_message(
+                session=db,
+                chat_id=group.chat_id,
+                thread_id=topic.message_thread_id,
+                text="when is the exam",
+                user_id=123,
+                message_id=781,
+            )
+
+            items = await crud.get_all(db, AcademicItem, group_id=group.id)
+
+    assert items == []
+    assert sent_messages == []
+

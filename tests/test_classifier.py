@@ -42,6 +42,16 @@ class TestClassification:
         result = classify("ok thanks")
         assert result.message_type == "DISCUSSION"
 
+    def test_academic_lookup_question_is_discussion(self):
+        result = classify("when is the exam")
+        assert result.message_type == "DISCUSSION"
+        assert result.confidence >= 0.7
+
+    def test_assignment_lookup_question_is_discussion(self):
+        result = classify("when is assignment due")
+        assert result.message_type == "DISCUSSION"
+        assert result.confidence >= 0.7
+
 
 class TestEntityExtraction:
     """Test entity extraction from messages."""
