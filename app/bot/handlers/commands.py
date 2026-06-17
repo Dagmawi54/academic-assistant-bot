@@ -331,10 +331,10 @@ async def cmd_sync_topic(message: types.Message, session: AsyncSession) -> None:
         await message.answer("This command only works in groups/forums.")
         return
 
-    from app.database.crud import get_group, get_topic, create
+    from app.database.crud import get_group_by_chat_id, get_topic, create
     from app.database.models import Topic
 
-    group = await get_group(session, message.chat.id)
+    group = await get_group_by_chat_id(session, message.chat.id)
     if not group:
         await message.answer("Please run /start in the main General topic first to register the group.")
         return
@@ -378,6 +378,64 @@ async def cmd_sync_topic(message: types.Message, session: AsyncSession) -> None:
             await message.answer("✅ Synced generically.\n\n⚠️ <b>Tip:</b> If this is your Quiz topic, either reply to the topic-creation message with `/sync_topic`, or type `/sync_topic quiz` so the bot knows its name!", parse_mode="HTML")
         else:
             await message.answer(f"✅ Synced! Registered as: <b>{html.escape(topic_name)}</b>", parse_mode="HTML")
+
+@router.message(Command("reindex_materials"))
+async def cmd_reindex_materials(message: types.Message, session: AsyncSession) -> None:
+    """Re-extract text from stored raw files for items with empty raw_text."""
+    if message.chat.type != "private":
+        await message.answer("Please use this command in DMs only.")
+        return
+
+    import os
+    import glob
+    from sqlalchemy import select, func as sa_func
+    from app.database.models import AcademicItem
+    from app.files.parser import extract_text_from_pdf, extract_text_from_docx
+
+    status_msg = await message.answer("🔄 <b>Re-indexing materials...</b>", parse_mode="HTML")
+
+    try:
+        # Find all items with no raw_text
+        stmt = select(AcademicItem).where(
+            sa_func.upper(AcademicItem.item_type).in_(["MATERIAL", "EXAM_COVERAGE"]),
+            (AcademicItem.raw_text.is_(None)) | (sa_func.length(AcademicItem.raw_text) < 50)
+        )
+        result = await session.execute(stmt)
+        items = result.scalars().all()
+
+        if not items:
+            await status_msg.edit_text("✅ All materials already have text. Nothing to re-index.", parse_mode="HTML")
+            return
+
+        updated = 0
+        for item in items:
+            # Try to find the stored raw file
+            pattern = f"app/storage/raw/doc_{item.source_message_id}_*"
+            files = glob.glob(pattern)
+            if not files:
+                continue
+
+            filepath = files[0]
+            ext = filepath.rsplit(".", 1)[-1].lower()
+
+            with open(filepath, "rb") as f:
+                file_bytes = f.read()
+
+            extracted = None
+            if ext == "pdf":
+                extracted = await extract_text_from_pdf(file_bytes)
+            elif ext in ("docx", "doc"):
+                extracted = await extract_text_from_docx(file_bytes)
+
+            if extracted and len(extracted.strip()) > 10:
+                item.raw_text = extracted.strip()
+                updated += 1
+
+        await session.commit()
+        await status_msg.edit_text(f"✅ <b>Re-indexed {updated}/{len(items)} materials.</b>\n\nRun /test_quiz to test quiz generation.", parse_mode="HTML")
+    except Exception as e:
+        import traceback
+        await status_msg.edit_text(f"❌ <b>Error:</b> {html.escape(str(e))}\n<pre>{html.escape(traceback.format_exc()[-500:])}</pre>", parse_mode="HTML")
 
 
 @router.message(Command("debug_runtime"), StateFilter(any_state), F.chat.type == "private")
