@@ -50,11 +50,12 @@ async def fetch_quiz_topic(session: AsyncSession, group_id: int) -> Topic | None
 
 async def generate_quiz_for_course(session: AsyncSession, course_id: int, num_questions: int = 5) -> list[dict[str, Any]] | None:
     """Extract material texts and prompt Groq to build a JSON quiz."""
+    from sqlalchemy import func as sa_func
     stmt = (
         select(AcademicItem)
         .where(
             AcademicItem.course_id == course_id,
-            AcademicItem.item_type == "MATERIAL",
+            sa_func.upper(AcademicItem.item_type).in_(["MATERIAL", "EXAM_COVERAGE"]),
             AcademicItem.status != "archived"
         )
     )
@@ -62,10 +63,12 @@ async def generate_quiz_for_course(session: AsyncSession, course_id: int, num_qu
     materials = result.scalars().all()
     
     if not materials:
+        logger.warning("quiz_no_materials", course_id=course_id)
         return None
         
     material_texts = [m.raw_text.strip() for m in materials if m.raw_text and len(m.raw_text.strip()) > 50]
     if not material_texts:
+        logger.warning("quiz_no_sufficient_text", course_id=course_id, total_items=len(materials))
         return None
         
     # Combine texts, limit to a reasonable context window (e.g. roughly 15000 chars)

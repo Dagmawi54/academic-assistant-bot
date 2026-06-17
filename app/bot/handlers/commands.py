@@ -246,20 +246,72 @@ async def cmd_materials(message: types.Message, state: FSMContext, session: Asyn
 
 @router.message(Command("test_quiz"))
 async def cmd_test_quiz(message: types.Message, state: FSMContext, session: AsyncSession) -> None:
-    """Manually invoke the Quiz Engine for testing purposes."""
+    """Manually invoke the Quiz Engine for testing purposes with diagnostics."""
     if message.chat.type != "private":
         await message.answer("Please use this command in Private Messages only.")
         return
-        
-    from app.services.quiz_engine import cron_bi_daily_quiz
+
+    from sqlalchemy import select, func as sa_func
+    from app.database.models import Group, Course, AcademicItem
+    from app.services.quiz_engine import generate_quiz_for_course, broadcast_quiz
     from app.bot import bot
-    
-    status_msg = await message.answer("🧪 <b>Forcing Quiz Engine Run...</b>\nChecking active courses and generating questions from recent materials. Please wait up to ~20 seconds...", parse_mode="HTML")
-    try:
-        await cron_bi_daily_quiz(bot)
-        await status_msg.edit_text("✅ <b>Quiz Broadcast Complete!</b> Check your group's Quiz topic.", parse_mode="HTML")
-    except Exception as e:
-        await status_msg.edit_text(f"❌ <b>Quiz Failed:</b> {str(e)}", parse_mode="HTML")
+    import random
+
+    status_msg = await message.answer("🧪 <b>Quiz Engine Diagnostics...</b>", parse_mode="HTML")
+
+    # 1. Find groups
+    g_res = await session.execute(select(Group).where(Group.active == True))
+    groups = g_res.scalars().all()
+    if not groups:
+        await status_msg.edit_text("❌ No active groups found.", parse_mode="HTML")
+        return
+
+    lines = [f"📊 <b>Diagnostics</b>\n• Active groups: {len(groups)}"]
+
+    for group in groups:
+        c_res = await session.execute(select(Course).where(Course.group_id == group.id))
+        courses = c_res.scalars().all()
+        lines.append(f"• Group <b>{html.escape(group.group_name or str(group.id))}</b>: {len(courses)} courses")
+
+        if not courses:
+            continue
+
+        for course in courses:
+            mat_res = await session.execute(
+                select(sa_func.count()).select_from(AcademicItem).where(
+                    AcademicItem.course_id == course.id,
+                    sa_func.upper(AcademicItem.item_type).in_(["MATERIAL", "EXAM_COVERAGE"]),
+                    AcademicItem.status != "archived"
+                )
+            )
+            mat_count = mat_res.scalar() or 0
+
+            text_res = await session.execute(
+                select(sa_func.count()).select_from(AcademicItem).where(
+                    AcademicItem.course_id == course.id,
+                    sa_func.upper(AcademicItem.item_type).in_(["MATERIAL", "EXAM_COVERAGE"]),
+                    AcademicItem.status != "archived",
+                    AcademicItem.raw_text.isnot(None),
+                    sa_func.length(AcademicItem.raw_text) > 50
+                )
+            )
+            text_count = text_res.scalar() or 0
+            lines.append(f"  └ {html.escape(course.course_name)}: {mat_count} items, {text_count} with text")
+
+        # Pick a random course and attempt quiz
+        course = random.choice(courses)
+        lines.append(f"\n🎯 Attempting quiz for: <b>{html.escape(course.course_name)}</b>")
+        await status_msg.edit_text("\n".join(lines) + "\n\n⏳ Generating...", parse_mode="HTML")
+
+        questions = await generate_quiz_for_course(session, course.id, num_questions=5)
+        if questions:
+            await broadcast_quiz(bot, session, course, questions)
+            lines.append(f"✅ Sent {len(questions)} questions!")
+        else:
+            lines.append("⚠️ No quiz generated — not enough text in materials for this course.")
+        break  # Only process one group
+
+    await status_msg.edit_text("\n".join(lines), parse_mode="HTML")
 
 
 
