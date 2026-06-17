@@ -273,7 +273,8 @@ async def cmd_test_quiz(message: types.Message, state: FSMContext, session: Asyn
         for group in groups:
             c_res = await session.execute(select(Course).where(Course.group_id == group.id))
             courses = c_res.scalars().all()
-            lines.append(f"• Group <b>{html.escape(group.group_name or str(group.id))}</b>: {len(courses)} courses")
+            group_label = f"[{group.id}] {group.department or 'Unknown'} Y{group.year or '?'} S{group.section or '?'}"
+            lines.append(f"• Group <b>{html.escape(group_label)}</b>: {len(courses)} courses")
     
             if not courses:
                 continue
