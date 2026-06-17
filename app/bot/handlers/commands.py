@@ -244,6 +244,24 @@ async def cmd_materials(message: types.Message, state: FSMContext, session: Asyn
     await message.answer(text, parse_mode="HTML", disable_web_page_preview=True)
 
 
+@router.message(Command("test_quiz"))
+async def cmd_test_quiz(message: types.Message, state: FSMContext, session: AsyncSession) -> None:
+    """Manually invoke the Quiz Engine for testing purposes."""
+    if message.chat.type != "private":
+        await message.answer("Please use this command in Private Messages only.")
+        return
+        
+    from app.services.quiz_engine import cron_bi_daily_quiz
+    from app.bot import bot
+    
+    status_msg = await message.answer("🧪 <b>Forcing Quiz Engine Run...</b>\nChecking active courses and generating questions from recent materials. Please wait up to ~20 seconds...", parse_mode="HTML")
+    try:
+        await cron_bi_daily_quiz(bot)
+        await status_msg.edit_text("✅ <b>Quiz Broadcast Complete!</b> Check your group's Quiz topic.", parse_mode="HTML")
+    except Exception as e:
+        await status_msg.edit_text(f"❌ <b>Quiz Failed:</b> {str(e)}", parse_mode="HTML")
+
+
 
 @router.message(Command("debug_runtime"), StateFilter(any_state), F.chat.type == "private")
 async def cmd_debug_runtime(
