@@ -186,10 +186,14 @@ def cancel_button() -> InlineKeyboardMarkup:
 
 def course_select(courses: Sequence[Course]) -> InlineKeyboardMarkup:
     """Select from available courses."""
-    buttons = [
-        [InlineKeyboardButton(text=course.course_name, callback_data=f"course:{course.id}")]
-        for course in courses
-    ]
+    buttons = []
+    seen = set()
+    for course in courses:
+        name_lower = course.course_name.lower().strip()
+        if name_lower not in seen:
+            seen.add(name_lower)
+            buttons.append([InlineKeyboardButton(text=course.course_name, callback_data=f"course:{course.id}")])
+
     buttons.append([InlineKeyboardButton(text="Cancel", callback_data="cancel")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -202,7 +206,12 @@ def announcement_target_select(
     """Select one or more announcement targets."""
     selected_course_ids = selected_course_ids or set()
     buttons = []
+    seen = set()
     for course in courses:
+        name_lower = course.course_name.lower().strip()
+        if name_lower in seen:
+            continue
+        seen.add(name_lower)
         marker = "✓ " if course.id in selected_course_ids else ""
         buttons.append(
             [InlineKeyboardButton(text=f"{marker}{course.course_name}", callback_data=f"ann:toggle_course:{course.id}")]

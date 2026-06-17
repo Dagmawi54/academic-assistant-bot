@@ -154,6 +154,97 @@ async def cmd_status(message: types.Message, state: FSMContext, session: AsyncSe
     await message.answer(text, parse_mode="HTML")
 
 
+@router.message(Command("calendar"), StateFilter(any_state))
+async def cmd_calendar(message: types.Message, state: FSMContext, session: AsyncSession) -> None:
+    """Generate and send an iCalendar export of upcoming deadlines."""
+    await state.clear()
+    group = await crud.get_group_by_chat_id(session, message.chat.id)
+
+    if not group:
+        if message.chat.type == "private":
+            managed = await crud.get_managed_groups(session, message.from_user.id)
+            if not managed:
+                await message.answer("You are not part of any registered group. Use this command in your class group.", parse_mode="HTML")
+                return
+            group = managed[0]
+        else:
+            await message.answer("❓ This group is not registered. Ask an admin to set it up.", parse_mode="HTML")
+            return
+
+    from app.services.calendar_export import generate_calendar_for_group
+    ics_file = await generate_calendar_for_group(session, group.id)
+    
+    if not ics_file:
+        await message.answer("ℹ️ No upcoming deadlines found for this group.", parse_mode="HTML")
+        return
+
+    await message.answer_document(
+        document=ics_file,
+        caption="📅 Here is the calendar export for your upcoming deadlines. You can open and import this into Google Calendar, Apple Calendar, or Outlook.",
+        parse_mode="HTML"
+    )
+
+
+@router.message(Command("materials"), StateFilter(any_state))
+async def cmd_materials(message: types.Message, state: FSMContext, session: AsyncSession) -> None:
+    """Show a list of all indexed study materials (documents) for the group."""
+    from sqlalchemy import select
+    from app.database.models import AcademicItem, Course
+    
+    await state.clear()
+    group = await crud.get_group_by_chat_id(session, message.chat.id)
+
+    if not group:
+        if message.chat.type == "private":
+            managed = await crud.get_managed_groups(session, message.from_user.id)
+            if not managed:
+                await message.answer("You are not part of any registered group. Use this command in your class group.", parse_mode="HTML")
+                return
+            group = managed[0]
+        else:
+            await message.answer("❓ This group is not registered. Ask an admin to set it up.", parse_mode="HTML")
+            return
+
+    stmt = (
+        select(AcademicItem, Course)
+        .outerjoin(Course, AcademicItem.course_id == Course.id)
+        .where(
+            AcademicItem.group_id == group.id,
+            AcademicItem.item_type == "MATERIAL",
+            AcademicItem.status != "archived"
+        )
+    )
+    result = await session.execute(stmt)
+    rows = result.all()
+
+    if not rows:
+        await message.answer("ℹ️ No study materials have been indexed for this group yet.", parse_mode="HTML")
+        return
+
+    # Group by course
+    grouped: dict[str, list[AcademicItem]] = {}
+    for item, course in rows:
+        cname = course.course_name if course else "General"
+        if cname not in grouped:
+            grouped[cname] = []
+        grouped[cname].append(item)
+
+    lines = ["📚 <b>Study Materials Index</b>\n"]
+    for cname, items in sorted(grouped.items()):
+        lines.append(f"📖 <b>{html.escape(cname)}</b>")
+        for item in items:
+            title = html.escape(item.title or "Document")
+            if item.source_message_link:
+                lines.append(f"  • <a href=\"{item.source_message_link}\">{title}</a>")
+            else:
+                lines.append(f"  • {title}")
+        lines.append("")
+
+    text = "\n".join(lines).strip()
+    await message.answer(text, parse_mode="HTML", disable_web_page_preview=True)
+
+
+
 @router.message(Command("debug_runtime"), StateFilter(any_state), F.chat.type == "private")
 async def cmd_debug_runtime(
     message: types.Message,

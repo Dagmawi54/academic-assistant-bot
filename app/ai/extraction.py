@@ -16,6 +16,7 @@ TYPE_MAP = {
     "quiz": "EXAM",
     "exam_coverage": "EXAM_COVERAGE",
     "schedule_update": "SCHEDULE_UPDATE",
+    "exam_schedule": "EXAM_SCHEDULE",
     "general_notice": "GENERAL_EVENT",
     "general_event": "GENERAL_EVENT",
     "course_event": "COURSE_EVENT",

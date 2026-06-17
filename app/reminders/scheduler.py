@@ -83,6 +83,32 @@ async def send_reminder(reminder_id: int) -> None:
                 logger.exception("reminder_send_failed", reminder_id=reminder_id)
 
 
+async def _run_weekly_digest() -> None:
+    """Wrapper function to execute the weekly digest."""
+    from app.bot import bot
+    from app.services.weekly_digest import send_weekly_digest
+
+    try:
+        await send_weekly_digest(bot)
+    except Exception as e:
+        logger.exception("weekly_digest_cron_failed", error=str(e))
+
+async def _run_bi_daily_quiz() -> None:
+    from app.bot import bot
+    from app.services.quiz_engine import cron_bi_daily_quiz
+    try:
+        await cron_bi_daily_quiz(bot)
+    except Exception as e:
+        logger.exception("bi_daily_quiz_cron_failed", error=str(e))
+
+async def _run_daily_exam_prep_quiz() -> None:
+    from app.bot import bot
+    from app.services.quiz_engine import cron_daily_exam_prep_quiz
+    try:
+        await cron_daily_exam_prep_quiz(bot)
+    except Exception as e:
+        logger.exception("daily_exam_prep_quiz_cron_failed", error=str(e))
+
 async def start_scheduler() -> None:
     """Start the scheduler and rebuild reminder jobs from DB."""
     from app.database.session import async_session_factory
@@ -122,6 +148,38 @@ async def start_scheduler() -> None:
                 total_jobs=len(scheduler.get_jobs()),
                 next_runs=next_runs[:10],
             )
+
+    # Schedule the weekly digest cron job (Sunday at 6:00 PM Addis Ababa time)
+    scheduler.add_job(
+        _run_weekly_digest,
+        "cron",
+        day_of_week="sun",
+        hour=18,
+        minute=0,
+        id="weekly_digest_cron",
+        replace_existing=True,
+    )
+
+    # Schedule the bi-daily quiz (e.g. at 10 AM)
+    scheduler.add_job(
+        _run_bi_daily_quiz,
+        "cron",
+        hour=10,
+        minute=0,
+        day="*/2",
+        id="bi_daily_quiz",
+        replace_existing=True,
+    )
+
+    # Schedule the daily exam prep check (e.g. at 4 PM)
+    scheduler.add_job(
+        _run_daily_exam_prep_quiz,
+        "cron",
+        hour=16,
+        minute=0,
+        id="daily_exam_prep_quiz",
+        replace_existing=True,
+    )
 
     scheduler.start()
     logger.info(

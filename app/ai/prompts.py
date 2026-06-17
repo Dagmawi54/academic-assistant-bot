@@ -63,3 +63,27 @@ def build_classification_prompt(text: str) -> list[dict[str, str]]:
         {"role": "system", "content": CLASSIFICATION_SYSTEM_PROMPT},
         {"role": "user", "content": f'Classify: "{text}"'},
     ]
+
+
+EXAM_SCHEDULE_PROMPT = """You are an academic information extraction assistant.
+
+You analyze exam schedule texts (which may come from transcribed images) and extract the list of individual exams.
+
+Respond ONLY with valid JSON in this exact structure:
+{
+    "exams": [
+        {
+            "course": "course name",
+            "deadline": "ISO 8601 datetime of the exam",
+            "title": "short descriptive title (e.g. Midterm, Final)"
+        }
+    ]
+}"""
+
+def build_exam_schedule_prompt(text: str) -> list[dict[str, str]]:
+    import datetime
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return [
+        {"role": "system", "content": f"{EXAM_SCHEDULE_PROMPT}\n\n[CONTEXT]\nToday's date and time is: {now_str}. Use this to resolve relative dates."},
+        {"role": "user", "content": text},
+    ]

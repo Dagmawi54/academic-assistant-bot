@@ -262,4 +262,5 @@ async def handle_group_message(message: types.Message, session: AsyncSession) ->
         text=text,
         user_id=user_id,
         message_id=message_id,
+        is_document=bool(message.document)
     )

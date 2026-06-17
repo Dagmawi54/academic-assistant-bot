@@ -169,6 +169,7 @@ def classify(text: str) -> ClassificationResult:
         "QUIZ": _score_keywords(lower, QUIZ_KEYWORDS),
         "EXAM_COVERAGE": _score_keywords(lower, COVERAGE_KEYWORDS),
         "SCHEDULE_UPDATE": _score_keywords(lower, SCHEDULE_KEYWORDS),
+        "EXAM_SCHEDULE": (_score_keywords(lower, EXAM_KEYWORDS) + _score_keywords(lower, SCHEDULE_KEYWORDS)) / 2,
         "GENERAL_EVENT": _score_keywords(lower, GENERAL_KEYWORDS),
     }
 
@@ -216,6 +217,8 @@ def classify(text: str) -> ClassificationResult:
     # Determine if it's course-specific or general
     if best_type == "GENERAL_EVENT" and not course_hint:
         msg_type = "GENERAL_EVENT"
+    elif best_type == "EXAM_SCHEDULE":
+        msg_type = "EXAM_SCHEDULE"
     elif best_type in ("ASSIGNMENT", "EXAM", "EXAM_COVERAGE") and course_hint:
         msg_type = best_type
     elif best_type == "SCHEDULE_UPDATE":
@@ -413,6 +416,7 @@ def _build_title(msg_type: str, course: str | None) -> str | None:
         "ASSIGNMENT": "Assignment",
         "EXAM": "Exam",
         "EXAM_COVERAGE": "Exam Coverage",
+        "EXAM_SCHEDULE": "Exam Schedule",
         "SCHEDULE_UPDATE": "Schedule Update",
         "GENERAL_EVENT": "Notice",
     }

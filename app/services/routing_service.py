@@ -21,7 +21,7 @@ from app.services.topic_context import resolve_topic_context
 logger = get_logger("routing_service")
 
 # Academic types that should always create an AcademicItem
-ACADEMIC_TYPES = {"ASSIGNMENT", "EXAM", "QUIZ", "EXAM_COVERAGE", "SCHEDULE_UPDATE", "GENERAL_EVENT", "COURSE_EVENT"}
+ACADEMIC_TYPES = {"ASSIGNMENT", "EXAM", "QUIZ", "EXAM_COVERAGE", "SCHEDULE_UPDATE", "EXAM_SCHEDULE", "GENERAL_EVENT", "COURSE_EVENT", "MATERIAL"}
 
 
 async def process_group_message(
@@ -33,6 +33,7 @@ async def process_group_message(
     user_id: int | None,
     message_id: int,
     trace_id: str | None = None,
+    is_document: bool = False,
 ) -> None:
     """Full message processing pipeline: classify → extract → route → notify."""
     try:
@@ -44,6 +45,7 @@ async def process_group_message(
             user_id=user_id,
             message_id=message_id,
             trace_id=trace_id,
+            is_document=is_document,
         )
     except Exception:
         logger.exception(
@@ -63,6 +65,7 @@ async def _process_group_message_inner(
     user_id: int | None,
     message_id: int,
     trace_id: str | None = None,
+    is_document: bool = False,
 ) -> None:
     """Inner implementation — separated so top-level can catch all exceptions."""
     logger.info(
@@ -140,9 +143,18 @@ async def _process_group_message_inner(
 
     # Skip non-academic messages (DISCUSSION or UNKNOWN)
     if classification.message_type in ("DISCUSSION", "UNKNOWN"):
-        if len(text.split()) < 3:
-            logger.info("ROUTE_EXIT", trace_id=trace_id, handler_name="process_group_message")
-            return
+        if is_document:
+            classification.message_type = "MATERIAL"
+            classification.confidence = 1.0
+            if not classification.title:
+                classification.title = _build_contextual_title(
+                    "MATERIAL",
+                    topic_context.course_name,
+                )
+        else:
+            if len(text.split()) < 3:
+                logger.info("ROUTE_EXIT", trace_id=trace_id, handler_name="process_group_message")
+                return
 
         # Dual threshold routing logic
         if classification.confidence >= 0.7:
@@ -190,6 +202,47 @@ async def _process_group_message_inner(
     reminder_count = 0
     if classification.message_type in ACADEMIC_TYPES:
         course = topic_context.course
+        
+        if classification.message_type == "EXAM_SCHEDULE":
+            from app.ai.prompts import build_exam_schedule_prompt
+            from app.ai.academic_extraction_client import academic_extraction_client
+            from dateutil import parser as dateparser
+            
+            prompt_msgs = build_exam_schedule_prompt(text)
+            resp = await academic_extraction_client.complete_json(prompt_msgs, response_format={"type": "json_object"})
+            exam_list = resp.get("exams", [])
+            
+            for edata in exam_list:
+                c_name = edata.get("course")
+                d_str = edata.get("deadline")
+                if not d_str:
+                    continue
+                parsed_date = None
+                try:
+                    parsed_date = dateparser.parse(str(d_str))
+                except:
+                    continue
+                
+                c = await crud.get_course_by_name(session, group.id, c_name) if c_name else None
+                chat_link = f"https://t.me/c/{str(chat_id).replace('-100', '')}/{message_id}" if chat_id and message_id else None
+                
+                exam_item = AcademicItem(
+                    group_id=group.id,
+                    course_id=c.id if c else None,
+                    item_type="EXAM",
+                    title=edata.get("title", "Exam"),
+                    deadline=parsed_date,
+                    status="approved",
+                    source_message_id=message_id,
+                    source_chat_id=chat_id,
+                    source_message_link=chat_link,
+                    raw_text=text
+                )
+                await crud.create(session, exam_item)
+            logger.info("exam_schedule_parsed", group_id=group.id, exams_count=len(exam_list))
+            await session.commit()
+            return
+            
         if not course and classification.course_hint:
             course = await crud.get_course_by_name(session, group.id, classification.course_hint)
 
