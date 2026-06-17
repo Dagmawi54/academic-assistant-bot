@@ -237,7 +237,7 @@ async def handle_group_message(message: types.Message, session: AsyncSession) ->
                 logger.info("voice_transcribed_for_message", message_id=message_id)
                 text = f"{text}\n\n[Audio Transcript]:\n{transcript}".strip()
 
-    if not text:
+    if not text and not message.document and not message.photo:
         logger.info(
             "group_message_ignored_no_extracted_text",
             chat_id=chat_id,
@@ -245,6 +245,11 @@ async def handle_group_message(message: types.Message, session: AsyncSession) ->
             message_id=message_id,
         )
         return
+        
+    if not text:
+        # Give fallback text so it still routes to MATERIAL/EXAM_SCHEDULE
+        fallback = message.document.file_name if message.document and message.document.file_name else "Uploaded material"
+        text = f"[Document]: {fallback}"
 
     logger.info(
         "group_message",

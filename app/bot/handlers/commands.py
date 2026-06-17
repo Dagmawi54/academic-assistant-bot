@@ -323,6 +323,63 @@ async def cmd_test_quiz(message: types.Message, state: FSMContext, session: Asyn
 
 
 
+@router.message(Command("sync_topic"))
+@router.message(Command("sync_topics"))
+async def cmd_sync_topic(message: types.Message, session: AsyncSession) -> None:
+    """Manually register the current forum topic so the bot can use it for routing."""
+    if message.chat.type not in ["group", "supergroup"]:
+        await message.answer("This command only works in groups/forums.")
+        return
+
+    from app.database.crud import get_group, get_topic, create
+    from app.database.models import Topic
+
+    group = await get_group(session, message.chat.id)
+    if not group:
+        await message.answer("Please run /start in the main General topic first to register the group.")
+        return
+
+    thread_id = message.message_thread_id
+    if not thread_id:
+        await message.answer("Cannot sync: This is the General topic or not a forum thread.")
+        return
+
+    topic = await get_topic(session, message.chat.id, thread_id)
+    topic_name = f"Topic {thread_id}"
+    
+    # If replying to the creation message:
+    if message.reply_to_message and message.reply_to_message.forum_topic_created:
+        topic_name = message.reply_to_message.forum_topic_created.name
+    else:
+        # Ask user to rename it so the bot catches the forum_topic_edited event, OR if they provide a name:
+        args = message.text.split(" ", 1)
+        if len(args) > 1:
+            topic_name = args[1].strip()
+
+    if topic:
+        topic.topic_name = topic_name
+        topic.status = "active"
+        await session.commit()
+        if "quiz" in topic_name.lower():
+            await message.answer(f"✅ Synced! This topic is now registered as: <b>{html.escape(topic_name)}</b>.\n\nThe AI Quiz Engine will now route quizzes here!", parse_mode="HTML")
+        else:
+            await message.answer(f"✅ Re-synced! Topic updated to: <b>{html.escape(topic_name)}</b>", parse_mode="HTML")
+    else:
+        new_topic = Topic(
+            group_id=group.id,
+            chat_id=message.chat.id,
+            message_thread_id=thread_id,
+            topic_name=topic_name,
+            topic_type="ignored",
+            status="active"
+        )
+        await create(session, new_topic)
+        if len(message.text.split(" ")) == 1 and not (message.reply_to_message and message.reply_to_message.forum_topic_created):
+            await message.answer("✅ Synced generically.\n\n⚠️ <b>Tip:</b> If this is your Quiz topic, either reply to the topic-creation message with `/sync_topic`, or type `/sync_topic quiz` so the bot knows its name!", parse_mode="HTML")
+        else:
+            await message.answer(f"✅ Synced! Registered as: <b>{html.escape(topic_name)}</b>", parse_mode="HTML")
+
+
 @router.message(Command("debug_runtime"), StateFilter(any_state), F.chat.type == "private")
 async def cmd_debug_runtime(
     message: types.Message,
