@@ -142,6 +142,7 @@ async def _process_group_message_inner(
     )
 
     # Skip non-academic messages (DISCUSSION or UNKNOWN)
+    ai_result = None
     if classification.message_type in ("DISCUSSION", "UNKNOWN"):
         if is_document:
             classification.message_type = "MATERIAL"
@@ -170,16 +171,16 @@ async def _process_group_message_inner(
                 logger.info("ROUTE_LOG", trace_id=trace_id, action="ai_fallback_triggered")
                 ai_result = await _try_ai_extraction(text)
 
-        if ai_result and ai_result.get("type") not in (
-            "discussion",
-            "unknown",
-            "DISCUSSION",
-            "UNKNOWN",
-        ):
-            classification = _merge_ai_result(classification, ai_result)
-        else:
-            logger.info("ROUTE_EXIT", trace_id=trace_id, handler_name="process_group_message")
-            return
+            if ai_result and ai_result.get("type") not in (
+                "discussion",
+                "unknown",
+                "DISCUSSION",
+                "UNKNOWN",
+            ):
+                classification = _merge_ai_result(classification, ai_result)
+            else:
+                logger.info("ROUTE_EXIT", trace_id=trace_id, handler_name="process_group_message")
+                return
 
     # 3. If rule-based confidence is low, augment with AI
     if classification.confidence < 0.7 and classification.message_type != "DISCUSSION":
