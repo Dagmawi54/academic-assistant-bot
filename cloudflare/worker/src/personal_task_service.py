@@ -280,7 +280,8 @@ async def parse_task_intent(ai_binding, text: str, timezone_name: str, now_ms: i
 
 def _stable_task_id(user_id: int, source_update_id: int | None, now_ms: int) -> int:
     source = str(source_update_id) if source_update_id is not None else f"{now_ms}:{user_id}"
-    digest = hashlib.blake2b(f"{user_id}:{source}".encode(), digest_size=7).digest()
+    # Keep IDs below JavaScript's 2^53 safe-integer ceiling; Workers D1 binds through JS.
+    digest = hashlib.blake2b(f"{user_id}:{source}".encode(), digest_size=6).digest()
     return int.from_bytes(digest, "big") or 1
 
 

@@ -226,6 +226,7 @@ def test_task_crud_is_owner_scoped_and_completion_cancels_reminder(database):
         )
         task = await service.create_task(database, 100, 12, intent, "Africa/Addis_Ababa", 1_000)
         assert task and task["title"] == "Submit lab"
+        assert task["id"] < 2**53  # D1's JS-backed Python binding cannot bind BigInt values.
         replay = await service.create_task(database, 100, 12, intent, "Africa/Addis_Ababa", 2_000)
         assert replay["id"] == task["id"]
         assert await service.complete_task(database, 200, task["id"], 3_000) is False
