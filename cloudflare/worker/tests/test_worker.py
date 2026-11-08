@@ -394,9 +394,10 @@ def test_private_group_setup_request_returns_bot_linking_steps_without_tutor(mon
         1234, "", "", "academicgroupmanagementbot", object(), "",
     ))
 
-    assert "/group_id" in reply
-    assert "/group_setup" in reply
-    assert "COLLEGE_INVITE_CODE" in reply
+    assert isinstance(reply, worker.TelegramReply)
+    assert "/group_setup" in reply.text
+    assert "invite code" not in reply.text.casefold()
+    assert "startgroup=setup" in reply.reply_markup["inline_keyboard"][0][0]["url"]
     tutor.assert_not_awaited()
 
 
@@ -676,31 +677,25 @@ def test_academic_sync_endpoint_requires_shared_secret(monkeypatch):
     assert database.runs == []
 
 
-def test_college_provisioning_stores_only_hashed_invite_code(monkeypatch):
+def test_college_provisioning_does_not_create_a_group_invite_code(monkeypatch):
     worker = load_worker(monkeypatch)
     database = FakeDatabase()
     request = SimpleNamespace(
         scope={"env": SimpleNamespace(DB=database, ACADEMIC_SYNC_SECRET="test-secret")}
     )
-    invite_code = "random-code-123456"
     payload = worker.CollegeProvision(
         college_id="sample-college",
         college_name="Sample College",
-        invite_code=invite_code,
-        remaining_uses=10,
     )
 
     response = asyncio.run(worker.provision_college(payload, request, "test-secret"))
 
     assert response.status_code == 200
-    assert len(database.runs) == 2
+    assert len(database.runs) == 1
     college_sql, college_values = database.runs[0]
     assert "INSERT INTO colleges" in college_sql
     assert college_values[:2] == ("sample-college", "Sample College")
-    invite_sql, invite_values = database.runs[1]
-    assert "INSERT INTO college_invite_codes" in invite_sql
-    assert invite_values[0] == worker._invite_code_hash(invite_code)
-    assert invite_values[0] != invite_code
+    assert all("college_invite_codes" not in query for query, _values in database.runs)
 
 
 def test_academic_command_parses_addis_deadline_and_keeps_course_title(monkeypatch):
@@ -1314,15 +1309,18 @@ def test_digest_delivery_claim_is_bounded_and_lease_protected(monkeypatch):
     assert values == (110_000, 5, 50_000, 50_000, 5, 50_000, 50_000)
 
 
-def test_group_setup_command_is_private_and_validates_target_chat_and_code(monkeypatch):
+def test_private_group_setup_offers_a_code_free_add_to_group_link(monkeypatch):
     worker = load_worker(monkeypatch)
 
-    assert worker.parse_group_setup_command("/group_setup -100123456789 college-join-code-123") == {
-        "chat_id": "-100123456789",
-        "invite_code": "college-join-code-123",
-    }
-    assert worker.parse_group_setup_command("/group_setup 12345 short") is None
-    assert worker.parse_group_setup_command("/group_setup -100123456789") is None
+    reply = asyncio.run(worker._group_setup_command(
+        FakeDatabase(), "token", {"from": {"id": 7}}, {"type": "private"},
+        "/group_setup -100123456789 Legacy-Code-123456", 123,
+    ))
+
+    assert isinstance(reply, worker.TelegramReply)
+    assert "college invite code" not in reply.text.casefold()
+    assert "startgroup=setup" in reply.reply_markup["inline_keyboard"][0][0]["url"]
+    assert "Add bot to your class group" in reply.reply_markup["inline_keyboard"][0][0]["text"]
 
 
 def test_course_mapping_command_rejects_names_that_are_not_course_topics(monkeypatch):
@@ -1339,7 +1337,7 @@ def test_course_name_normalization_is_case_and_whitespace_stable(monkeypatch):
     assert worker.normalize_course_name("  Operating   Systems ") == "operating systems"
 
 
-def test_group_id_command_returns_chat_id_for_group_onboarding(monkeypatch):
+def test_group_id_command_no_longer_requires_copying_an_id_or_code(monkeypatch):
     worker = load_worker(monkeypatch)
     update = {
         "message": {
@@ -1352,37 +1350,57 @@ def test_group_id_command_returns_chat_id_for_group_onboarding(monkeypatch):
         worker._process_telegram_update(FakeDatabase(), "token", 1, update, 1_700_000_000_000)
     )
 
-    assert "-100123456789" in response
+    assert "/group_setup" in response
+    assert "Group ID:" not in response
+    assert "INVITE_CODE" not in response
 
 
-def test_private_group_setup_consumes_code_without_echoing_it(monkeypatch):
+def test_group_admin_can_self_link_group_from_startgroup_link_without_a_code(monkeypatch):
     worker = load_worker(monkeypatch)
-    received = {}
+    database = FakeDatabase()
+    monkeypatch.setattr(worker, "is_group_admin_or_representative", AsyncMock(return_value=False))
+    monkeypatch.setattr(worker, "is_telegram_chat_admin", AsyncMock(return_value=True))
+    monkeypatch.setattr(worker.group_setup_service, "get_group_setup_state", AsyncMock(return_value={
+        "status": "unlinked", "chat_id": "-100123456789",
+    }))
+    monkeypatch.setattr(worker.group_setup_service, "begin_setup_run", AsyncMock(return_value={
+        "status": "semester_required", "chat_id": "-100123456789",
+    }))
 
-    async def fake_register(database, token, user_id, chat_id, invite_code, now_ms):
-        received.update(user_id=user_id, chat_id=chat_id, invite_code=invite_code)
-        return True
+    reply = asyncio.run(worker._process_message_update(
+        database, "token", 2,
+        {
+            "chat": {"id": -100123456789, "type": "supergroup", "title": "Section G"},
+            "from": {"id": 7}, "text": "/start@academicgroupmanagementbot setup",
+        },
+        123, "", "model", "academicgroupmanagementbot",
+    ))
 
-    monkeypatch.setattr(worker, "register_group_with_invite", fake_register)
-    update = {
-        "message": {
-            "chat": {"id": 5, "type": "private"},
-            "from": {"id": 5},
-            "text": "/group_setup -100123456789 College-Code-1234",
-        }
-    }
+    assert isinstance(reply, worker.TelegramReply)
+    assert "active semester" in reply.text
+    assert worker.is_telegram_chat_admin.await_args.args == ("token", "-100123456789", 7)
+    assert any("INSERT INTO colleges" in query for query, _values in database.runs)
+    assert any("INSERT INTO academic_groups" in query for query, _values in database.runs)
+    assert all("college_invite_codes" not in query for query, _values in database.runs)
 
-    response = asyncio.run(
-        worker._process_telegram_update(FakeDatabase(), "token", 2, update, 1_700_000_000_000)
-    )
 
-    assert received == {
-        "user_id": 5,
-        "chat_id": "-100123456789",
-        "invite_code": "College-Code-1234",
-    }
-    assert "College-Code-1234" not in response
-    assert "linked" in response
+def test_non_admin_cannot_self_link_a_group(monkeypatch):
+    worker = load_worker(monkeypatch)
+    database = FakeDatabase()
+    monkeypatch.setattr(worker, "is_group_admin_or_representative", AsyncMock(return_value=False))
+    monkeypatch.setattr(worker, "is_telegram_chat_admin", AsyncMock(return_value=False))
+    monkeypatch.setattr(worker.group_setup_service, "get_group_setup_state", AsyncMock(return_value={
+        "status": "unlinked", "chat_id": "-100123456789",
+    }))
+
+    reply = asyncio.run(worker._guided_group_setup_command(
+        database, "token", {"from": {"id": 8}},
+        {"id": -100123456789, "type": "supergroup", "title": "Section G"},
+        "-100123456789", "/group_setup", 123,
+    ))
+
+    assert "Telegram group admin" in reply
+    assert database.runs == []
 
 
 def test_guided_group_setup_previews_exact_and_uncertain_topic_mappings(monkeypatch):

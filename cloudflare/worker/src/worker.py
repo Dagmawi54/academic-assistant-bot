@@ -2,7 +2,6 @@
 
 import asyncio
 import batch_exercises
-import hashlib
 import hmac
 import json
 import logging
@@ -92,12 +91,10 @@ class AcademicItemSyncBatch(BaseModel):
 
 
 class CollegeProvision(BaseModel):
-    """One-time trusted bootstrap of a college and its group invite code."""
+    """Trusted internal bootstrap for a college record; groups link themselves in Telegram."""
 
     college_id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{1,62}$")
     college_name: str = Field(min_length=2, max_length=200)
-    invite_code: str = Field(pattern=r"^[A-Za-z0-9_-]{16,128}$")
-    remaining_uses: int = Field(default=100, ge=1, le=1000)
 
 
 def parse_academic_command(text: str) -> dict | None:
@@ -128,18 +125,6 @@ def parse_academic_command(text: str) -> dict | None:
         "title": title.strip(),
         "deadline_ms": int(local_deadline.timestamp() * 1000),
     }
-
-
-def parse_group_setup_command(text: str) -> dict | None:
-    """Parse private group onboarding; invite codes must stay out of group history."""
-    match = re.fullmatch(
-        r"\s*/group_setup(?:@\w+)?\s+(-100\d{5,})\s+([A-Za-z0-9_-]{16,128})\s*",
-        text,
-        flags=re.IGNORECASE,
-    )
-    if not match:
-        return None
-    return {"chat_id": match.group(1), "invite_code": match.group(2)}
 
 
 def parse_course_map_command(text: str) -> str | None:
@@ -1348,43 +1333,43 @@ async def is_telegram_chat_member(token: str, chat_id: str, user_id: int) -> boo
     )
 
 
-def _invite_code_hash(code: str) -> str:
-    return hashlib.sha256(code.encode("utf-8")).hexdigest()
-
-
-async def register_group_with_invite(
-    database,
-    token: str,
-    user_id: int,
-    chat_id: str,
-    invite_code: str,
-    now_ms: int,
+async def register_group_without_college_code(
+    database, token: str, user_id: int, chat_id: str, group_title: str, now_ms: int,
 ) -> bool:
-    """Verify Telegram group-admin status and consume one college invite use."""
+    """Create an isolated college workspace for a group after verifying its Telegram admin."""
     if not await is_telegram_chat_admin(token, chat_id, user_id):
         return False
-    invite = await database.prepare(
-        """
-        UPDATE college_invite_codes
-        SET remaining_uses = remaining_uses - 1
-        WHERE code_hash = ? AND active = 1 AND remaining_uses > 0
-          AND (expires_at_ms IS NULL OR expires_at_ms > ?)
-        RETURNING college_id
-        """
-    ).bind(_invite_code_hash(invite_code), now_ms).first()
-    if not invite:
+    try:
+        numeric_chat_id = int(chat_id)
+    except (TypeError, ValueError):
         return False
+    if numeric_chat_id >= 0:
+        return False
+
+    existing = await database.prepare(
+        "SELECT college_id FROM academic_groups WHERE chat_id = ?"
+    ).bind(chat_id).first()
+    college_id = str((existing or {}).get("college_id") or f"telegram-group-{abs(numeric_chat_id)}")
+    title = str(group_title or "").strip()[:200] or f"Telegram class group {abs(numeric_chat_id)}"
+    if not existing or not existing.get("college_id"):
+        await database.prepare(
+            """
+            INSERT INTO colleges (college_id, college_name, status, created_at_ms)
+            VALUES (?, ?, 'active', ?)
+            ON CONFLICT(college_id) DO UPDATE SET
+                college_name = excluded.college_name,
+                status = 'active'
+            """
+        ).bind(college_id, title, now_ms).run()
     await database.prepare(
         """
         INSERT INTO academic_groups (chat_id, college_id, group_title, active, created_by_user_id, created_at_ms)
         VALUES (?, ?, ?, 1, ?, ?)
         ON CONFLICT(chat_id) DO UPDATE SET
-            college_id = excluded.college_id,
             group_title = excluded.group_title,
-            active = 1,
-            created_by_user_id = excluded.created_by_user_id
+            active = 1
         """
-    ).bind(chat_id, invite["college_id"], None, user_id, now_ms).run()
+    ).bind(chat_id, college_id, title, user_id, now_ms).run()
     return True
 
 
@@ -1756,7 +1741,8 @@ def _help_message(chat_type: str = "private") -> str:
             "• <b>Personal assistant:</b> tell me to remind you about something, or open <b>My tasks</b> to add and manage tasks. Use <code>/timezone</code> to set your local timezone.\n"
             "Open the <b>Menu</b> beside the message box to pick a command. In your class group, use its menu for deadlines and shared materials.\n\n"
             "<b>Connect a class group</b>\n"
-            "A group admin can run <code>/group_id</code> in the group, then send <code>/group_setup -100CHATID INVITE_CODE</code> to me privately."
+            "Tap <a href=\"https://t.me/academicgroupmanagementbot?startgroup=setup\">Add me to your class group</a>. "
+            "A Telegram group admin can then run <code>/group_setup</code> in the group. No codes or group IDs need to be copied."
         )
     return (
         "<b>Academic Assistant help</b>\n\n" + common +
@@ -1764,7 +1750,9 @@ def _help_message(chat_type: str = "private") -> str:
         "• <b>Find shared files:</b> <code>/resources keyword</code>\n"
         "• <b>Class rep:</b> <code>/assignment Title | YYYY-MM-DD HH:MM</code>, <code>/exam Title | YYYY-MM-DD HH:MM</code>, or <code>/class_poll Question | Option A | Option B</code>.\n\n"
         "<b>Group admin setup</b>\n"
-        "Use <code>/semester_set Fall 2026</code>, map each course topic with <code>/course_map Course Name</code>, and run <code>/quiz_topic</code> in the Quiz topic. Use <code>/quiz_status</code> to check setup.\n\n"
+        "Run <code>/group_setup</code> once to connect this group, then set its semester with <code>/semester_set Fall 2026</code>. "
+        "Map each course topic with <code>/course_map Course Name</code>, and run <code>/quiz_topic</code> in the Quiz topic. "
+        "Use <code>/quiz_status</code> to check setup.\n\n"
         "Tap the <b>Menu</b> button for available actions. Times use Addis Ababa time."
     )
 
@@ -1786,7 +1774,7 @@ async def ensure_telegram_command_menu(token: str) -> None:
             ("tasks", "List your personal tasks"),
             ("timezone", "Set your reminder timezone"),
             ("forget_tasks", "Delete all your personal tasks"),
-            ("group_setup", "Connect a class group using an invite code"),
+            ("group_setup", "Get the code-free class group setup link"),
         ]),
         ({"type": "all_group_chats"}, [
             ("help", "Show student and class help"),
@@ -1799,7 +1787,6 @@ async def ensure_telegram_command_menu(token: str) -> None:
             ("exam", "Add an exam deadline"),
             ("class_poll", "Post an anonymous class poll"),
             ("approve", "Confirm a suggested deadline"),
-            ("group_id", "Get this group’s ID"),
             ("semester_set", "Set the active semester"),
             ("course_map", "Map this topic to a course"),
             ("quiz_topic", "Set the Quiz topic"),
@@ -1883,7 +1870,7 @@ async def _save_and_announce_ai_event(database, message: dict, chat_id: str, upd
         now_ms=now_ms,
     )
     if not saved:
-        return "This group is not connected to a college yet. A group admin can link it privately with <code>/group_setup CHAT_ID INVITE_CODE</code>."
+        return "This group is not connected yet. A Telegram group admin can run <code>/group_setup</code> here to connect it."
     label = escape(event["item_type"].title())
     title = escape(event["title"])
     course = f"\nCourse: {escape(event['course_name'])}" if event.get("course_name") else ""
@@ -1923,38 +1910,12 @@ async def _explicit_event_command(database, token: str, message: dict, chat: dic
     )
 
 
-async def _group_setup_command(database, token: str, message: dict, chat: dict, text: str, now_ms: int) -> str | None:
+async def _group_setup_command(database, token: str, message: dict, chat: dict, text: str, now_ms: int) -> str | TelegramReply | None:
     if not re.match(r"^\s*/group_setup(?:@\w+)?(?:\s|$)", text, re.IGNORECASE):
         return None
-    if chat.get("type") != "private":
-        return "Send the group setup command privately so the invite code does not appear in group history."
-    parsed = parse_group_setup_command(text)
-    if not parsed or parsed["invite_code"].casefold() in {
-        "college_invite_code", "real_invite_code", "invite_code"
-    }:
-        return (
-            "🔗 <b>Finish linking your class group</b>\n\n"
-            "1. Add this bot to the class group, then send <code>/group_id</code> there. Copy the numeric ID from my reply.\n"
-            "2. Ask the college or assistant administrator for the college invite code. It is separate from the group's "
-            "Telegram <code>t.me/…</code> invite link; I cannot create it from that link.\n"
-            "3. In this private chat, replace both examples with the real values: "
-            "<code>/group_setup -1001234567890 REAL_INVITE_CODE</code>. Do not send the code in the group.\n\n"
-            "The uppercase words are examples, not values to copy."
-        )
-    user_id = (message.get("from") or {}).get("id")
-    if not user_id:
-        return "I couldn't identify your Telegram account."
-    registered = await register_group_with_invite(
-        database,
-        token,
-        int(user_id),
-        parsed["chat_id"],
-        parsed["invite_code"],
-        now_ms,
-    )
-    if not registered:
-        return "Group setup failed. Confirm you are an admin of that group and the college invite code is valid."
-    return "✅ Class group linked to its college. Admins can now map forum topics with <code>/course_map Course Name</code>."
+    if chat.get("type") == "private":
+        return _group_linking_help()
+    return "A group admin can run <code>/group_setup</code> inside the class group to link it. No copied values are needed."
 
 
 def _setup_preview_reply(state: dict) -> TelegramReply:
@@ -2001,25 +1962,38 @@ def _setup_preview_reply(state: dict) -> TelegramReply:
 
 
 async def _guided_group_setup_command(database, token, message, chat, chat_id, text, now_ms):
-    if not re.fullmatch(r"\s*/group_setup(?:@\w+)?\s*", text, re.IGNORECASE):
+    setup_trigger = re.fullmatch(
+        r"\s*(?:/group_setup(?:@\w+)?|/start@\w+\s+setup)\s*", text, re.IGNORECASE
+    )
+    if not setup_trigger:
         return None
     if chat.get("type") not in {"group", "supergroup"}:
         return None
     user_id = (message.get("from") or {}).get("id")
-    if type(user_id) is not int or not await is_group_admin_or_representative(database, token, chat_id, user_id):
-        return "Only a registered class rep or group admin can review course setup."
+    if type(user_id) is not int:
+        return "I couldn't identify your Telegram account."
+    authorized = await is_group_admin_or_representative(database, token, chat_id, user_id)
+    if not authorized:
+        state = await group_setup_service.get_group_setup_state(database, chat_id)
+        if state.get("status") != "unlinked":
+            return "Only a registered class rep or group admin can review course setup."
+        try:
+            registered = await register_group_without_college_code(
+                database, token, user_id, chat_id,
+                str(chat.get("title") or ""), now_ms,
+            )
+        except Exception:
+            logger.exception("group_self_link_failed chat_id=%s", chat_id)
+            return "I couldn't link this group right now. Please try again shortly."
+        if not registered:
+            return "Only a Telegram group admin can connect this group. Ask a group admin to run <code>/group_setup</code>."
     try:
         state = await group_setup_service.begin_setup_run(database, chat_id, user_id, now_ms)
     except Exception:
         logger.exception("guided_group_setup_failed chat_id=%s", chat_id)
         return "I couldn't check the group's course setup right now. Please try again shortly."
     if state.get("status") == "unlinked":
-        return (
-            "This group is not linked yet. In this group, send <code>/group_id</code> and copy the numeric ID I return. "
-            "Then privately send <code>/group_setup -1001234567890 REAL_INVITE_CODE</code>, replacing both examples with "
-            "the real values. The college invite code must come from your college or assistant administrator; a Telegram "
-            "<code>t.me/…</code> group link is not that code."
-        )
+        return "This group could not be linked. Ask a Telegram group admin to run <code>/group_setup</code> here."
     if state.get("status") == "semester_required":
         return TelegramReply(
             "The active semester isn't set. Choose the term used by this group, then I’ll review its course topics.",
@@ -2460,11 +2434,7 @@ async def _basic_command(database, message: dict, chat: dict, chat_id: str, text
     if re.fullmatch(r"\s*/group_id(?:@\w+)?\s*", text, re.IGNORECASE):
         if chat.get("type") not in {"group", "supergroup"}:
             return "Use <code>/group_id</code> inside your class group."
-        return (
-            f"Group ID: <code>{escape(chat_id)}</code>. Copy this number, then privately send "
-            f"<code>/group_setup {escape(chat_id)} REAL_INVITE_CODE</code> using the real college invite code from your "
-            "college or assistant administrator. A Telegram <code>t.me/…</code> group link is not that code."
-        )
+        return "Group IDs are no longer needed for setup. A Telegram group admin can run <code>/group_setup</code> here."
     digest_reply = await _digest_subscription_command(database, message, chat, chat_id, text, now_ms)
     if digest_reply is not None:
         return digest_reply
@@ -2977,18 +2947,10 @@ async def _process_message_update(
             return guided_setup_reply
         setup_reply = await _group_setup_command(database, token, message, chat, text_value, now_ms)
         if setup_reply is not None:
-            parsed_setup = parse_group_setup_command(text_value)
-            if (
-                chat.get("type") == "private"
-                and re.match(r"^\s*/group_setup(?:@\w+)?(?:\s|$)", text_value, re.IGNORECASE)
-                and (
-                    not parsed_setup
-                    or parsed_setup["invite_code"].casefold()
-                    in {"college_invite_code", "real_invite_code", "invite_code"}
-                )
-            ):
-                await _save_setup_help_context(database, message, chat_id, setup_reply, now_ms)
-            return TelegramReply(setup_reply)
+            setup_text = setup_reply.text if isinstance(setup_reply, TelegramReply) else setup_reply
+            if chat.get("type") == "private":
+                await _save_setup_help_context(database, message, chat_id, setup_text, now_ms)
+            return setup_reply if isinstance(setup_reply, TelegramReply) else TelegramReply(setup_reply)
     resource_saved, resource_reply = await _save_resource_update(
         database, chat_id, message, text_value, now_ms
     )
@@ -3004,8 +2966,8 @@ async def _process_message_update(
     text = raw_text
     if chat.get("type") == "private" and await _is_group_linking_request(database, message, chat_id, text):
         guide = _group_linking_help()
-        await _save_setup_help_context(database, message, chat_id, guide, now_ms)
-        return TelegramReply(guide)
+        await _save_setup_help_context(database, message, chat_id, guide.text, now_ms)
+        return guide
     replied_to = message.get("reply_to_message") or {}
     if replied_to.get("text") == HOME_SETUP_SEMESTER_PROMPT and chat.get("type") in {"group", "supergroup"}:
         return await _semester_set_command(
@@ -3093,15 +3055,17 @@ async def _save_setup_help_context(database, message: dict, chat_id: str, answer
         logger.exception("group_setup_context_save_failed user_id=%s", user_id)
 
 
-def _group_linking_help() -> str:
-    return (
-        "🔗 <b>Connect your class group to Academic Assistant</b>\n\n"
-        "1. Add <a href=\"https://t.me/academicgroupmanagementbot\">@academicgroupmanagementbot</a> to your Telegram class group.\n"
-        "2. In that group, send <code>/group_id</code> and copy the numeric ID in my reply.\n"
-        "3. Ask the college or assistant administrator for the college invite code. This is not the group's Telegram invite link.\n"
-        "4. Message me privately with <code>/group_setup -1001234567890 REAL_INVITE_CODE</code>, replacing both examples with the real values.\n"
-        "5. After it is linked, run <code>/group_setup</code> in the group to review semester and course-topic mappings.\n\n"
-        "Keep the college invite code private. A Telegram <code>t.me/…</code> group link cannot replace it."
+def _group_linking_help() -> TelegramReply:
+    return TelegramReply(
+        "🔗 <b>Connect your class group</b>\n\n"
+        "1. Tap <b>Add bot to your class group</b> below and choose the group.\n"
+        "2. Telegram starts setup in that group. A group admin runs <code>/group_setup</code> if setup does not open automatically.\n"
+        "3. Choose the active semester when prompted. I’ll match course topics to clear course names and ask you about uncertain matches.\n\n"
+        "Each group gets its own workspace. No codes or group IDs need to be copied.",
+        {"inline_keyboard": [[{
+            "text": "➕ Add bot to your class group",
+            "url": "https://t.me/academicgroupmanagementbot?startgroup=setup",
+        }]]},
     )
 
 
@@ -3764,7 +3728,7 @@ async def telegram_webhook(
             chat_id = str((message.get("chat") or {}).get("id", ""))
             incoming_command = message.get("text") or ""
             reply_markup = tutor_reply_markup
-            if re.match(r"^/(?:start|help)(?:@\w+)?(?:\s|$)", incoming_command, re.IGNORECASE):
+            if reply_markup is None and re.match(r"^/(?:start|help)(?:@\w+)?(?:\s|$)", incoming_command, re.IGNORECASE):
                 reply_markup = _welcome_reply_markup((message.get("chat") or {}).get("type", "private"))
             await send_telegram_message(
                 runtime_env.BOT_TOKEN,
@@ -3819,7 +3783,7 @@ async def provision_college(
     request: Request,
     x_academic_sync_secret: str = Header(default=""),
 ) -> JSONResponse:
-    """Provision one college and a hashed, use-limited group setup code."""
+    """Provision a college record; group admins link groups directly from Telegram."""
     runtime_env = request.scope.get("env")
     expected = getattr(runtime_env, "ACADEMIC_SYNC_SECRET", "") if runtime_env else ""
     if not expected or not hmac.compare_digest(x_academic_sync_secret, expected):
@@ -3833,22 +3797,6 @@ async def provision_college(
             ON CONFLICT(college_id) DO UPDATE SET college_name = excluded.college_name, status = 'active'
             """
         ).bind(payload.college_id, payload.college_name.strip(), now_ms).run()
-        await runtime_env.DB.prepare(
-            """
-            INSERT INTO college_invite_codes (
-                code_hash, college_id, remaining_uses, active, expires_at_ms, created_at_ms
-            ) VALUES (?, ?, ?, 1, NULL, ?)
-            ON CONFLICT(code_hash) DO UPDATE SET
-                college_id = excluded.college_id,
-                remaining_uses = excluded.remaining_uses,
-                active = 1
-            """
-        ).bind(
-            _invite_code_hash(payload.invite_code),
-            payload.college_id,
-            payload.remaining_uses,
-            now_ms,
-        ).run()
     except Exception:
         logger.exception("college_provision_failed college_id=%s", payload.college_id)
         return JSONResponse({"status": "not_provisioned"}, status_code=503)

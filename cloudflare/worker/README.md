@@ -55,9 +55,9 @@ The scheduled handler can now send real messages if `BOT_TOKEN` is configured. N
 
 ## College and group onboarding
 
-Provision a college through the authenticated `POST /internal/colleges` endpoint. Send a unique, random invite code in the request body; the Worker stores only its SHA-256 hash and a bounded use count. The endpoint uses the same `ACADEMIC_SYNC_SECRET` as app synchronization. Keep the raw invite code with the college administrator and send it to the class admin through a private channel.
+Provision a college record through the authenticated `POST /internal/colleges` endpoint with `college_id` and `college_name`. The endpoint uses the same `ACADEMIC_SYNC_SECRET` as app synchronization. Group setup no longer requires college invite codes.
 
-In Telegram, the class admin adds the bot to the intended supergroup and runs `/group_id`. They then start the bot privately and send `/group_setup -100CHATID INVITE_CODE`. The Worker verifies that sender is a Telegram group admin before consuming an invite use and linking the group. The invite code is never sent in group chat. A Telegram group admin can assign a class rep by replying to the student's message with `/rep_add`, or remove them with `/rep_remove`. In each forum course topic, a group admin or class rep runs `/course_map Course Name`. Academic items and resource links inherit that course from the mapped topic. `/upcoming` and `/resources keyword` stay inside the current group, and resources preserve Telegram's own access controls by linking to the original message.
+In Telegram, open `https://t.me/academicgroupmanagementbot?startgroup=setup`, choose the class group, and add the bot. Telegram sends `/start@academicgroupmanagementbot setup` to the group; the Worker verifies the sender is a Telegram group admin, creates an isolated workspace named for that group, and opens guided setup. If needed, an admin can run `/group_setup` in the group. The group admin chooses the active semester, then applies clear course-topic matches or resolves uncertain ones. There is no separate college code or chat ID to copy. A Telegram group admin can assign a class rep by replying to the student's message with `/rep_add`, or remove them with `/rep_remove`. In each forum course topic, a group admin or class rep runs `/course_map Course Name`. Academic items and resource links inherit that course from the mapped topic. `/upcoming` and `/resources keyword` stay inside the current group, and resources preserve Telegram's own access controls by linking to the original message.
 
 ## Staging deployment status
 
@@ -114,7 +114,7 @@ Migration `0007_weekly_digests.sql` adds explicit private-bot starts, group/topi
 
 ## College scope and permissions
 
-Migration `0008_college_group_setup.sql` adds colleges, hashed invite codes, registered groups, courses, topic mappings, and class representatives. Invite codes are use-limited and are consumed only after the sender passes Telegram's current group-admin check. Group admins control rep assignment; admins and assigned reps can record and approve event dates. Queries join resources and academic items to the active registered group and its college before returning data.
+Migration `0008_college_group_setup.sql` adds colleges, the legacy invite-code table, registered groups, courses, topic mappings, and class representatives. The legacy table remains in existing D1 databases but current onboarding does not create or consume invite codes. New groups receive an isolated workspace only after their Telegram admin is verified. Group admins control rep assignment; admins and assigned reps can record and approve event dates. Queries join resources and academic items to the active registered group and its college before returning data.
 
 ## Legacy private quizzes
 
@@ -152,7 +152,7 @@ The AI parser proposes an action and explicit zoned timestamp; validation reject
 
 Migration `0017_guided_group_setup.sql` records forum topic titles seen by the bot, setup runs, and mapping changes. After a class group is linked, an admin or registered representative sets the active term with `/semester_set Fall 2026`, then runs `/group_setup` in the group. The bot shows exact topic/course matches and asks for a button choice when a match is uncertain. Only exact, unique matches for active courses in the selected semester can be auto-applied. Each mapping is audited and **Undo latest setup** restores or removes those changes only while the topic mapping has not changed since.
 
-Telegram bots do not get a listing of all forum topics created before they observed them. The Worker saves topic-created and topic-edited service events it receives after the group is linked. For older topics it has not observed, an admin or representative must open that topic and use `/course_map Course Name`; sending an ordinary message does not recreate the topic-created event. The private `/group_setup CHAT_ID INVITE_CODE` invite flow remains unchanged. Apply `0016` and `0017` through the standard D1 migration workflow before deploying this code to a database; these migrations are not applied automatically by the application.
+Telegram bots do not get a listing of all forum topics created before they observed them. The Worker saves topic-created and topic-edited service events it receives after the group is linked. For older topics it has not observed, an admin or representative must open that topic and use `/course_map Course Name`; sending an ordinary message does not recreate the topic-created event. Group linking now uses the Telegram `startgroup=setup` link or `/group_setup` inside the group; no chat ID or college invite code is needed. Apply `0016` and `0017` through the standard D1 migration workflow before deploying this code to a database; these migrations are not applied automatically by the application.
 
 ## Worksheet solving and tutor reply controls
 
