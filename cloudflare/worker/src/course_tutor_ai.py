@@ -221,16 +221,15 @@ def should_offer_visual_lesson(question: str, answer: str = "") -> bool:
     normalized = re.sub(r"[^a-z0-9 ]", "", str(question or "").casefold()).strip()
     if _is_small_talk(normalized):
         return False
-    short_definition = (
-        len(normalized.split()) <= 7
-        and bool(re.match(r"^(?:what does .+ mean|what is the meaning of .+|meaning of .+|define .+)$", normalized))
-        and not re.search(r"\b(?:in detail|deeply|step by step|worked example|examples)\b", normalized)
-    )
-    if short_definition and len(str(answer or "").strip()) < 450:
+    # Search intent alone is not enough: conversational replies can contain words
+    # such as "latest" or "current" (for example, "is the latest deploy working?").
+    # Only attach a lesson when the answer itself has enough teaching content to
+    # make that extra destination useful.
+    if len(str(answer or "").strip()) < 450:
         return False
     if should_search_web(question):
         return True
-    return len(str(answer or "").strip()) >= 450 and len(normalized.split()) >= 3
+    return len(normalized.split()) >= 3
 
 
 def parse_search_results(payload) -> list[dict[str, str]]:
