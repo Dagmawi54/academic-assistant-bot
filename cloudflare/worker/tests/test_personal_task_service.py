@@ -219,6 +219,17 @@ def test_user_timezone_defaults_to_addis_and_accepts_valid_iana_zone(database):
     asyncio.run(scenario())
 
 
+def test_default_addis_timezone_has_a_safe_fallback_when_worker_has_no_tzdata(monkeypatch):
+    def missing_zone(_name):
+        raise service.ZoneInfoNotFoundError("no system timezone database")
+
+    monkeypatch.setattr(service, "ZoneInfo", missing_zone)
+
+    zone = service.get_timezone(service.DEFAULT_TIMEZONE)
+
+    assert zone.utcoffset(None).total_seconds() == 3 * 60 * 60
+
+
 def test_task_crud_is_owner_scoped_and_completion_cancels_reminder(database):
     async def scenario():
         intent = service.TaskIntent(

@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone as datetime_timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 TASK_INTENT_MODEL = "@cf/zai-org/glm-4.7-flash"
@@ -37,7 +37,14 @@ class DefiniteDeliveryError(Exception):
 def get_timezone(timezone_name: str) -> ZoneInfo:
     try:
         return ZoneInfo(timezone_name)
-    except (ZoneInfoNotFoundError, ValueError, TypeError):
+    except ZoneInfoNotFoundError:
+        # Cloudflare's Python runtime has no OS zoneinfo database. Addis is the
+        # configured default and stays at UTC+03 year-round, so reminders keep
+        # working even if the bundled tzdata package is unavailable.
+        if timezone_name == DEFAULT_TIMEZONE:
+            return datetime_timezone(timedelta(hours=3), DEFAULT_TIMEZONE)
+        raise ValueError("unsupported_timezone") from None
+    except (ValueError, TypeError):
         raise ValueError("unsupported_timezone") from None
 
 
@@ -140,7 +147,7 @@ def _parse_iso_in_zone(value, zone: ZoneInfo, now_ms: int, *, is_reminder: bool)
         return None
     if parsed.utcoffset() != roundtrip.utcoffset():
         return None
-    instant = int(parsed.astimezone(timezone.utc).timestamp() * 1000)
+    instant = int(parsed.astimezone(datetime_timezone.utc).timestamp() * 1000)
     if is_reminder and instant <= now_ms:
         return None
     return instant
@@ -241,7 +248,7 @@ async def parse_task_intent(ai_binding, text: str, timezone_name: str, now_ms: i
     except ValueError:
         zone = get_timezone(DEFAULT_TIMEZONE)
         timezone_name = DEFAULT_TIMEZONE
-    local_now = datetime.fromtimestamp(now_ms / 1000, tz=timezone.utc).astimezone(zone).isoformat()
+    local_now = datetime.fromtimestamp(now_ms / 1000, tz=datetime_timezone.utc).astimezone(zone).isoformat()
     messages = [
         {
             "role": "system",
