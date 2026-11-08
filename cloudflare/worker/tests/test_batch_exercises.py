@@ -194,11 +194,29 @@ class FollowupTests(unittest.TestCase):
         self.assertIn("fu:c:0", str(followups.keyboard([], None, truncated=True)))
         self.assertIsNone(followups.keyboard([], None, truncated=False))
 
+    def test_suggestions_do_not_repeat_button_actions(self):
+        items = followups.parse_suggestions(
+            "Check | What is the relationship between distance and Hubble's Law?\n"
+            "Quick check | Can you check Hubble's Law for a galaxy 100 Mpc away?\n"
+            "Example | Can you work through Hubble's Law with a different distance?"
+        )
+
+        filtered = followups._relevant_suggestions(
+            items,
+            "Explain Hubble's Law and recession velocity.",
+            "Hubble's Law relates a galaxy's distance to its recession velocity.",
+        )
+
+        self.assertEqual([item["label"] for item in filtered], ["Check", "Example"])
+
     def test_suggest_uses_model_and_roundtrips_storage(self):
         class Ai:
             async def run(self, model, payload):
-                return {"response": "Why sqrt | Why stop at the square root?\nTrace 49 | Can you trace n = 49?\nPitfall | What goes wrong for n = 1?"}
-        answer = "<b>Prime check</b> " + "loop up to sqrt(n) and test divisibility. " * 6
+                return {"response": "Why sqrt | Why stop at the square root?\nTrace 49 | Can you trace the divisor checks for n = 49?\nPitfall | What goes wrong for n = 1?"}
+        answer = (
+            "<b>Prime check</b> For n = 49, trace possible divisors only up to the square root. "
+            "This avoids the common mistake of using a wrong bound; if the loop goes wrong for n = 1, check the edge case. "
+        ) + "The loop tests divisibility. " * 4
         items = run(followups.suggest(Ai(), "is 49 prime", answer))
         self.assertEqual(len(items), 3)
         db = Db()

@@ -45,7 +45,9 @@ def _button_label(label: str, question: str) -> str:
         return "Why?"
     if re.search(r"\b(?:example|examples|for instance|sample|demonstrate)\b", normalized):
         return "Example"
-    if re.search(r"\b(?:apply|use this|try|work through)\b", normalized):
+    if re.search(r"\b(?:pitfall|mistake|edge case|what goes wrong|when does .* fail)\b", normalized):
+        return "Pitfall"
+    if re.search(r"\b(?:apply|use this|try|work through|walk through|trace|calculate|compute)\b", normalized):
         return "Apply"
     if re.search(r"\b(?:compare|difference|versus|vs)\b", normalized):
         return "Compare"
@@ -57,16 +59,33 @@ def _button_label(label: str, question: str) -> str:
 
 
 def _relevant_suggestions(items: list[dict], question: str, answer: str) -> list[dict]:
-    """Drop follow-ups that introduce a subject absent from both the question and its answer."""
+    """Drop off-topic, duplicate-action, and near-duplicate follow-ups."""
     context = set(course_tutor_ai._content_terms(f"{question} {answer[:1600]}"))
     relevant = []
+    seen_labels = set()
+    seen_question_terms = []
     for item in items:
         terms = set(course_tutor_ai._content_terms(item.get("question", "")))
         shared = context.intersection(terms)
         # One generic word such as “model” or “law” is not enough to establish
         # that a suggested button belongs to this answer. Omit weak suggestions.
-        if shared and (len(shared) >= 2 or any(len(term) >= 6 for term in shared)):
-            relevant.append(item)
+        if not shared or (len(shared) < 2 and not any(len(term) >= 6 for term in shared)):
+            continue
+        label = str(item.get("label") or "").strip().casefold()
+        # Repeating a short action button (for example, two "Check" buttons) is
+        # confusing even when the hidden full questions differ. Similar wording
+        # under different labels is also not a useful set of choices.
+        duplicate_question = any(
+            course_tutor_ai._jaccard(list(terms), list(previous)) >= 0.75
+            for previous in seen_question_terms
+        )
+        if not label or label in seen_labels or duplicate_question:
+            continue
+        relevant.append(item)
+        seen_labels.add(label)
+        seen_question_terms.append(terms)
+        if len(relevant) == MAX_SUGGESTIONS:
+            break
     return relevant[:MAX_SUGGESTIONS]
 
 
