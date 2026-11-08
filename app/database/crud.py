@@ -6,11 +6,11 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.models import (
-    AcademicItem,
     AuditLog,
     Base,
     Course,
     Group,
+    ProcessedMessage,
     Reminder,
     Topic,
     User,
@@ -173,6 +173,28 @@ async def cancel_item_reminders(session: AsyncSession, item_id: int) -> None:
         .values(cancelled=True)
     )
     await session.execute(stmt)
+
+
+async def claim_processed_message(
+    session: AsyncSession,
+    *,
+    chat_id: int,
+    message_id: int,
+) -> bool:
+    """Claim a Telegram message once; return False when its receipt already exists."""
+    from sqlalchemy.exc import IntegrityError
+
+    receipt = ProcessedMessage(chat_id=chat_id, message_id=message_id)
+    try:
+        async with session.begin_nested():
+            session.add(receipt)
+            await session.flush()
+        return True
+    except IntegrityError:
+        existing = await session.get(ProcessedMessage, (chat_id, message_id))
+        if existing is not None:
+            return False
+        raise
 
 
 # ---------------------------------------------------------------------------

@@ -28,6 +28,9 @@ class DbSessionMiddleware(BaseMiddleware):
                     data["session"] = session
                     result = await handler(event, data)
                 logger.info("db_session_committed", **tx_context)
+                from app.integrations.cloudflare_sync import flush_queued_items
+
+                await flush_queued_items(session)
                 return result
             except Exception as exc:
                 logger.exception(

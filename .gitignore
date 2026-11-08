@@ -30,3 +30,4 @@ jobs.sqlite
 
 # Local validation logs
 .codex-logs/
+.worktrees/

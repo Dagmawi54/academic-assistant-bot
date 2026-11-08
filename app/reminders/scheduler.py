@@ -2,8 +2,8 @@
 
 from datetime import datetime
 
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from app.config import settings
 from app.logging import get_logger
@@ -28,10 +28,10 @@ scheduler = AsyncIOScheduler(
 
 async def send_reminder(reminder_id: int) -> None:
     """Send a scheduled reminder notification."""
-    from app.database.session import async_session_factory
+    from app.bot import bot
     from app.database import crud
     from app.database.models import AcademicItem, Reminder
-    from app.bot import bot
+    from app.database.session import async_session_factory
     from app.reminders.formatter import format_reminder
     from app.utils.timezone import now_addis
 
@@ -109,10 +109,19 @@ async def _run_daily_exam_prep_quiz() -> None:
     except Exception as e:
         logger.exception("daily_exam_prep_quiz_cron_failed", error=str(e))
 
+
+async def _run_cloudflare_sync_retry() -> None:
+    from app.integrations.cloudflare_sync import retry_pending_cloudflare_syncs
+
+    try:
+        await retry_pending_cloudflare_syncs()
+    except Exception as exc:
+        logger.exception("cloudflare_sync_retry_failed", error_type=type(exc).__name__)
+
 async def start_scheduler() -> None:
     """Start the scheduler and rebuild reminder jobs from DB."""
-    from app.database.session import async_session_factory
     from app.database import crud
+    from app.database.session import async_session_factory
     from app.utils.timezone import now_addis
 
     # Rebuild pending reminders as jobs
@@ -178,6 +187,14 @@ async def start_scheduler() -> None:
         hour=16,
         minute=0,
         id="daily_exam_prep_quiz",
+        replace_existing=True,
+    )
+
+    scheduler.add_job(
+        _run_cloudflare_sync_retry,
+        "interval",
+        minutes=1,
+        id="cloudflare_sync_retry",
         replace_existing=True,
     )
 

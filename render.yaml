@@ -6,8 +6,10 @@ services:
     plan: free
     healthCheckPath: /health
     envVars:
+      - key: APP_ENV
+        value: production
       - key: DATABASE_URL
-        sync: false # Set this to your Neon connection string in the Render UI
+        sync: false # Required hosted PostgreSQL connection string; SQLite is rejected in production.
       - key: USE_POLLING
         value: "True" # Switch to False once WEBHOOK_URL is set
       # These must be set securely in the Render Dashboard

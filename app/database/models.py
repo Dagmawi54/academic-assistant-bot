@@ -197,3 +197,32 @@ class DuplicateLog(Base):
     reason: Mapped[str] = mapped_column(String(255))
     raw_text: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class ProcessedMessage(Base):
+    """Receipt used to make Telegram message processing idempotent."""
+
+    __tablename__ = "processed_messages"
+
+    chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    message_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    status: Mapped[str] = mapped_column(String(20), default="processed", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class CloudflareSyncOutbox(Base):
+    """Durable queue for mirroring committed academic reminders into D1."""
+
+    __tablename__ = "cloudflare_sync_outbox"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    academic_item_id: Mapped[int] = mapped_column(Integer, nullable=False, unique=True, index=True)
+    payload: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    last_error: Mapped[str | None] = mapped_column(String(100))
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    synced_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+    __table_args__ = (Index("ix_cloudflare_sync_due", "status", "next_attempt_at"),)

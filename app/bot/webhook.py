@@ -1,14 +1,16 @@
 """FastAPI webhook routes and application lifecycle."""
 
 from contextlib import asynccontextmanager
+from hmac import compare_digest
 
 from aiogram import types
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 
 from app.bot import bot, dp, validate_fsm_storage
+from app.cache.redis_cache import close_cache, init_cache
 from app.config import settings
-from app.database.session import init_db, close_db
-from app.cache.redis_cache import init_cache, close_cache
+from app.database.session import close_db, init_db
 from app.logging import get_logger, setup_logging
 
 logger = get_logger("webhook")
@@ -100,9 +102,6 @@ async def lifespan(application: FastAPI):  # noqa: ANN201, ARG001
 # FastAPI app with lifespan
 app = FastAPI(title="Academic Bot", lifespan=lifespan)
 
-from fastapi.responses import JSONResponse
-
-
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception) -> Response:
     """Catch unhandled API exceptions and return structured JSON."""
@@ -116,6 +115,14 @@ async def global_exception_handler(request: Request, exc: Exception) -> Response
 @app.post("/webhook")
 async def telegram_webhook(request: Request) -> Response:
     """Receive Telegram updates via webhook."""
+    if not settings.use_polling:
+        expected_secret = settings.webhook_secret
+        if not expected_secret:
+            raise HTTPException(status_code=503, detail="Webhook authentication is not configured")
+        supplied_secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+        if not compare_digest(supplied_secret, expected_secret):
+            raise HTTPException(status_code=403, detail="Forbidden")
+
     update_data = await request.json()
     update = types.Update(**update_data)
     await dp.feed_update(bot=bot, update=update)

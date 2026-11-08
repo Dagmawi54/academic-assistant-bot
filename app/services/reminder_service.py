@@ -1,11 +1,13 @@
 """Reminder service — create, cancel, rebuild reminders from academic items."""
 
+from sqlalchemy import select
+
+from app.config import settings
 from app.database import crud
 from app.database.models import AcademicItem, Course, Reminder, Topic
 from app.database.session import async_session_factory
-from app.config import settings
-from app.utils.timezone import reminder_times
 from app.logging import get_logger
+from app.utils.timezone import reminder_times
 
 logger = get_logger("reminder_service")
 
@@ -16,6 +18,9 @@ async def create_reminders_for_item(item_id: int) -> None:
         async with session.begin():
             item = await crud.get_by_id(session, AcademicItem, item_id)
             await create_reminders_for_item_in_session(session, item)
+        from app.integrations.cloudflare_sync import flush_queued_items
+
+        await flush_queued_items(session)
 
 
 async def create_reminders_for_item_in_session(
@@ -24,6 +29,8 @@ async def create_reminders_for_item_in_session(
 ) -> list[Reminder]:
     """Create reminder entries using the caller's active transaction."""
     if not item or not item.deadline:
+        if item:
+            await _queue_item_snapshot(session, item)
         logger.info(
             "academic_reminder_rows_created",
             item_id=item.id if item else None,
@@ -60,6 +67,8 @@ async def create_reminders_for_item_in_session(
     for reminder in reminders:
         schedule_reminder(reminder.id, reminder.send_time)
 
+    await _queue_item_snapshot(session, item)
+
     logger.info(
         "academic_reminder_rows_created",
         item_id=item.id,
@@ -67,6 +76,14 @@ async def create_reminders_for_item_in_session(
         thread_id=thread_id,
     )
     return reminders
+
+
+async def _queue_item_snapshot(session, item: AcademicItem) -> None:
+    """Queue all reminders, including previously sent or cancelled rows."""
+    from app.integrations.cloudflare_sync import queue_academic_item
+
+    result = await session.execute(select(Reminder).where(Reminder.item_id == item.id))
+    await queue_academic_item(session, item, list(result.scalars().all()))
 
 
 def _as_db_datetime(value):
@@ -92,6 +109,7 @@ async def cancel_group_reminders(group_id: int) -> None:
             for item in items:
                 if item.status in ("new", "active", "verified"):
                     await crud.cancel_item_reminders(session, item.id)
+                    await _queue_item_snapshot(session, item)
                     cancelled += 1
 
             logger.info(
@@ -99,3 +117,6 @@ async def cancel_group_reminders(group_id: int) -> None:
                 group_id=group_id,
                 items_affected=cancelled,
             )
+        from app.integrations.cloudflare_sync import flush_queued_items
+
+        await flush_queued_items(session)

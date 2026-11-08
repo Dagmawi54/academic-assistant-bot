@@ -1,15 +1,18 @@
 """Application configuration loaded from environment variables."""
 
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings
-from pydantic import Field
 
 
 class Settings(BaseSettings):
     """Central configuration — reads from .env or environment."""
 
+    app_env: str = Field("development", alias="APP_ENV")
+
     # Telegram
     bot_token: str = Field(..., alias="BOT_TOKEN")
     webhook_url: str = Field("", alias="WEBHOOK_URL")
+    webhook_secret: str = Field("", alias="WEBHOOK_SECRET")
     use_polling: bool = Field(True, alias="USE_POLLING")
 
     # AI
@@ -25,6 +28,10 @@ class Settings(BaseSettings):
     # Database
     database_url: str = Field("sqlite+aiosqlite:///./bot.db", alias="DATABASE_URL")
 
+    # Optional Cloudflare D1 reminder mirror. Kept disabled until a Worker is deployed.
+    cloudflare_worker_url: str = Field("", alias="CLOUDFLARE_WORKER_URL")
+    cloudflare_sync_secret: str = Field("", alias="CLOUDFLARE_SYNC_SECRET")
+
     @property
     def async_database_url(self) -> str:
         import re
@@ -33,16 +40,16 @@ class Settings(BaseSettings):
             url = url.replace("postgres://", "postgresql+asyncpg://", 1)
         elif url.startswith("postgresql://"):
             url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
-            
+
         # asyncpg does not support 'sslmode', it requires 'ssl' instead
         if "?sslmode=" in url:
             url = url.replace("?sslmode=", "?ssl=")
         elif "&sslmode=" in url:
             url = url.replace("&sslmode=", "&ssl=")
-            
+
         # asyncpg does not support 'channel_binding' (commonly added by Neon)
         url = re.sub(r"([?&])channel_binding=[^&]*(&?)", lambda m: m.group(1) if m.group(2) == "&" and m.group(1) == "?" else (m.group(2) or ""), url)
-            
+
         return url
 
     @property
@@ -76,6 +83,15 @@ class Settings(BaseSettings):
 
     # Reminder defaults (hours before deadline)
     reminder_offsets_hours: list[int] = [48, 24, 0]
+
+    @model_validator(mode="after")
+    def require_hosted_database_in_production(self) -> "Settings":
+        """Refuse local SQLite storage in production deployments."""
+        if self.app_env.strip().lower() == "production" and not self.database_url.startswith(
+            ("postgres://", "postgresql://", "postgresql+")
+        ):
+            raise ValueError("Production requires a hosted PostgreSQL DATABASE_URL")
+        return self
 
     model_config = {
         "env_file": ".env",

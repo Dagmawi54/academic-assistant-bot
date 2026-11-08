@@ -54,6 +54,7 @@ async def process_group_message(
             chat_id=chat_id,
             message_id=message_id,
         )
+        raise
 
 
 async def _process_group_message_inner(
@@ -93,6 +94,19 @@ async def _process_group_message_inner(
     if not group:
         logger.info("ROUTE_EXIT", trace_id=trace_id, handler_name="process_group_message")
         return  # Unregistered group — ignore
+
+    claimed = await crud.claim_processed_message(
+        session,
+        chat_id=chat_id,
+        message_id=message_id,
+    )
+    if not claimed:
+        logger.info(
+            "telegram_message_replay_ignored",
+            chat_id=chat_id,
+            message_id=message_id,
+        )
+        return
 
     topic_context = await resolve_topic_context(
         session,

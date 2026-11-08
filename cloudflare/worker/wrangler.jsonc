@@ -1,0 +1,26 @@
+{
+  "$schema": "https://raw.githubusercontent.com/cloudflare/workers-sdk/main/packages/wrangler/config-schema.json",
+  "name": "academic-assistant-college-pilot",
+  "main": "src/worker.py",
+  "compatibility_date": "2026-10-30",
+  "compatibility_flags": ["python_workers"],
+  "vars": {
+    "BOT_USERNAME": "academicgroupmanagementbot",
+    "PUBLIC_BASE_URL": "https://academic-assistant-college-pilot.earnlets96.workers.dev",
+    "TELEGRAM_IV_RHASH": ""
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "academic-assistant-college-pilot",
+      "database_id": "0c8ee71e-b250-467d-b068-ec021e69bfc7",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "ai": {
+    "binding": "AI"
+  },
+  "triggers": {
+    "crons": ["* * * * *", "0 0 * * *"]
+  }
+}
