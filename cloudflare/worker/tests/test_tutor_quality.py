@@ -280,6 +280,26 @@ class RequestAnalysisTests(unittest.TestCase):
     def test_example_request(self):
         self.assertEqual(self.kind("Give me an example").kind, "example")
 
+    def test_bare_example_is_anchored_to_the_latest_lesson(self):
+        history = [
+            {"role": "user", "content": "Tell me how the universe was created"},
+            {"role": "assistant", "content": "# How the Universe Began\n\nThe Big Bang explains the early universe."},
+            {"role": "user", "content": "How does that relate to Hubble's Law?"},
+            {"role": "assistant", "content": "# Connecting the Big Bang to Hubble's Law\n\nHubble's Law relates a galaxy's distance to its recession speed."},
+        ]
+
+        request = ai.analyze_request("Give me a worked example", history)
+        messages = ai.build_general_tutor_messages(
+            "Give me a worked example", [], conversation_history=history, request_analysis=request,
+        )
+        payload = json.loads(messages[-1]["content"])
+
+        self.assertEqual(request.kind, "example")
+        self.assertEqual(payload["tutor_request"]["example_subject"], "Connecting the Big Bang to Hubble's Law")
+        self.assertEqual([turn["role"] for turn in request.history], ["user", "assistant"])
+        self.assertIn("Hubble's Law", request.history[-1]["content"])
+        self.assertNotIn("How the Universe Began", str(request.history))
+
     def test_specific_problem(self):
         self.assertEqual(self.kind("Calculate 12 * 7 + 3").kind, "solve")
         self.assertEqual(self.kind("Solve it for input 0101").kind, "solve")

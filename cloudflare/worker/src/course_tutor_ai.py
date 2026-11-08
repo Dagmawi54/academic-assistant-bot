@@ -99,10 +99,10 @@ REQUEST_GUIDANCE = {
         "(answers in spoilers) and offer the next stage."
     ),
     "example": (
-        "The student wants an example of the topic just discussed. Use the immediately preceding assistant explanation and "
-        "tutor_request.topic as the source of the example. Demonstrate that exact topic and explain how each step applies. "
-        "Never switch to a different subject or substitute a generic example from another field (for example, do not answer "
-        "a Hubble's Law follow-up with linear regression). Keep theory minimal."
+        "The student wants an example of the exact lesson just discussed. Treat tutor_request.example_subject as the subject to "
+        "demonstrate and the immediately preceding assistant explanation as its source. Apply that same law, method, or concept; "
+        "do not choose a merely related concept or a different field. If the subject is unclear, ask one brief clarification instead "
+        "of guessing. Keep theory minimal and label any invented example values."
     ),
     "solve": (
         "The student wants a specific problem solved. Use givens, goal, method, numbered working, and a verified final "
@@ -379,6 +379,7 @@ class TutorRequest:
     retrieval_query: str = ""
     covered: list = field(default_factory=list)
     learner: str = ""
+    example_subject: str = ""
 
     def payload(self) -> dict:
         guidance = REQUEST_GUIDANCE.get(self.kind, REQUEST_GUIDANCE["new"])
@@ -387,6 +388,8 @@ class TutorRequest:
         data = {"type": self.kind, "guidance": guidance}
         if self.topic and self.kind != "new":
             data["topic"] = self.topic
+        if self.kind == "example" and self.example_subject:
+            data["example_subject"] = self.example_subject
         if self.covered:
             data["already_covered"] = self.covered
         if self.learner:
@@ -448,12 +451,42 @@ def _previous_topic(exchanges: list[list[dict]]) -> str:
     return user_turns[-1][:160] if user_turns else ""
 
 
+def _latest_answer_subject(exchanges: list[list[dict]]) -> str:
+    """Use the latest tutor answer's title as a concrete anchor for short example requests."""
+    for group in reversed(exchanges):
+        answer = next((turn["content"] for turn in reversed(group) if turn["role"] == "assistant"), "")
+        if not answer:
+            continue
+        for raw_line in answer.splitlines()[:8]:
+            line = raw_line.strip()
+            if not line:
+                continue
+            heading = re.match(r"^#{1,6}\s+(.+?)\s*#*\s*$", line)
+            bold_heading = re.match(r"^(?:\*\*|__)(.+?)(?:\*\*|__)\s*:?[ \t]*$", line)
+            if heading or bold_heading:
+                subject = (heading or bold_heading).group(1)
+            elif line.startswith(("📘 ", "📖 ", "🧩 ")):
+                subject = line[2:].strip()
+            else:
+                # The model often opens with a plain, short title rather than a Markdown heading.
+                subject = line if len(line) <= 120 and not re.search(r"[.!?]$", line) else ""
+            subject = re.sub(r"^[^\w]+", "", subject, flags=re.UNICODE).strip(" *_#")
+            if subject and not re.match(r"^(?:definition|example|key takeaway|what it is)\s*:", subject, re.IGNORECASE):
+                return subject[:160]
+            # Do not mistake a later section heading for the title if the answer opened with prose.
+            if not (heading or bold_heading or line.startswith(("📘 ", "📖 ", "🧩 "))):
+                break
+    return ""
+
+
 def _jaccard(a: list[str], b: list[str]) -> float:
     left, right = set(a), set(b)
     return len(left & right) / len(left | right) if left | right else 0.0
 
 
-def _finalize(kind: str, topic: str, history: list[dict], query: str, learner: str = "") -> TutorRequest:
+def _finalize(
+    kind: str, topic: str, history: list[dict], query: str, learner: str = "", example_subject: str = ""
+) -> TutorRequest:
     cleaned: list[dict] = []
     covered: list[str] = []
     for turn in history:
@@ -462,7 +495,9 @@ def _finalize(kind: str, topic: str, history: list[dict], query: str, learner: s
             covered += found
         if content:
             cleaned.append({"role": turn["role"], "content": content})
-    return TutorRequest(kind, topic, cleaned, query[:MAX_QUERY_CHARS], list(dict.fromkeys(covered))[:12], learner)
+    return TutorRequest(
+        kind, topic, cleaned, query[:MAX_QUERY_CHARS], list(dict.fromkeys(covered))[:12], learner, example_subject
+    )
 
 
 def analyze_request(question: str, conversation_history=None) -> TutorRequest:
@@ -551,6 +586,12 @@ def analyze_request(question: str, conversation_history=None) -> TutorRequest:
         query = previous_topic
     else:
         query = f"{text} {previous_topic}"
+    if kind == "example":
+        # Keep only the lesson immediately being followed up on. Sending several older
+        # topics diluted the subject anchor and let the model drift to nearby concepts.
+        latest_exchange = next((group for group in reversed(recent) if len(group) == 2), recent[-1] if recent else [])
+        example_subject = _latest_answer_subject([latest_exchange]) or topic
+        return _finalize(kind, topic, latest_exchange, query, learner, example_subject)
     return _finalize(kind, topic, [turn for group in recent for turn in group], query, learner)
 
 
