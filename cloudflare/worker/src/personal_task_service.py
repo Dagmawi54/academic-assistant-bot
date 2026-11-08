@@ -104,8 +104,16 @@ def _parse_relative_reminder(text: str, timezone_name: str, now_ms: int) -> Task
     except ValueError:
         timezone_name = DEFAULT_TIMEZONE
     remainder = text[:match.start()] + " " + text[match.end():]
-    remainder = re.sub(r"\b(?:can|could|would)\s+(?:you|u)\s+", " ", remainder, flags=re.IGNORECASE)
-    remainder = re.sub(r"\b(?:please|put|set|add|create|make|a|an|the|personal|task|tasks|reminder|reminders|for|me|to|remind)\b", " ", remainder, flags=re.IGNORECASE)
+    command_prefix = (
+        r"^\s*(?:(?:can|could|would)\s+(?:you|u)\s+)?(?:please\s+)?"
+        r"(?:(?:put|set|add|create|make)\s+)?(?:a|an)?\s*(?:personal\s+)?"
+        r"(?:reminders?|tasks?)\b(?:\s+for\s+me)?(?:\s+to)?\s*"
+        r"|^\s*remind\s+me(?:\s+to)?\s*"
+    )
+    for _ in range(2):
+        remainder = re.sub(command_prefix, "", remainder, flags=re.IGNORECASE)
+    remainder = re.sub(r"\bremind\s+me\b", " ", remainder, flags=re.IGNORECASE)
+    remainder = re.sub(r"\bplease\b", " ", remainder, flags=re.IGNORECASE)
     title = re.sub(r"[^\w\s'-]", " ", remainder, flags=re.UNICODE)
     title = re.sub(r"\s+", " ", title).strip(" -'\t\r\n")[:MAX_TASK_TITLE_CHARS]
     if title.casefold() in {"", "u", "you", "my", "it", "this", "that"}:

@@ -184,6 +184,13 @@ def test_relative_reminder_after_two_minutes_is_handled_without_ai():
     assert intent.title == "Reminder"
     assert intent.reminder_at_ms == now_ms + 120_000
 
+    named = asyncio.run(service.parse_task_intent(
+        NeverCallAi(), "Remind me to make dinner in 2 minutes",
+        "Africa/Addis_Ababa", now_ms,
+    ))
+    assert named.title == "make dinner"
+    assert named.reminder_at_ms == now_ms + 120_000
+
 
 def test_parse_task_intent_uses_compact_json_only_workers_ai_request():
     binding = AsyncMock()

@@ -3045,7 +3045,7 @@ def _group_linking_help() -> str:
         "🔗 <b>Connect your class group to Academic Assistant</b>\n\n"
         "1. Add <a href=\"https://t.me/academicgroupmanagementbot\">@academicgroupmanagementbot</a> to your Telegram class group.\n"
         "2. In that group, send <code>/group_id</code> and copy the ID it returns.\n"
-        "3. Message me privately with <code>/group_setup -100… COLLEGE_INVITE_CODE</code>. "
+        "3. Message me privately with <code>/group_setup -100CHATID COLLEGE_INVITE_CODE</code>. "
         "A college admin must provide the invite code.\n"
         "4. After it is linked, run <code>/group_setup</code> in the group to review semester and course-topic mappings.\n\n"
         "I can guide the mapping, but I can’t join or link a group until you add me and submit its ID with a valid college invite code."
