@@ -282,13 +282,15 @@ def test_tutor_stream_callback_does_not_wait_for_telegram_preview_request(monkey
         assert sent == ["First preview"]
 
         await draft.on_partial("Second preview " + ("more detail " * 10))
-        gate.set()
-        await draft.finish()
+        preview_task = draft.flush_task
+        await asyncio.wait_for(draft.finish(), timeout=0.05)
+        await asyncio.sleep(0)
+        assert preview_task.cancelled()
 
     asyncio.run(scenario())
 
     assert sent[0] == "First preview"
-    assert sent[1].startswith("Second preview")
+    assert len(sent) == 1
 
 
 def test_ask_command_passes_question_and_course_topic_context_to_tutor(monkeypatch):
@@ -413,6 +415,81 @@ def test_contextual_link_it_to_you_resolves_against_recent_group_setup(monkeypat
     ))
 
     assert result is True
+
+
+def test_private_group_link_confirmation_is_verified_before_success_is_claimed(monkeypatch):
+    worker = load_worker(monkeypatch)
+    database = FakeDatabase()
+    database.statement_results = {"results": []}
+    monkeypatch.setattr(worker.course_tutor_service, "_read_tutor_context", AsyncMock(return_value=("", [
+        {"role": "user", "content": "How do I connect my class group to this bot?"},
+        {"role": "assistant", "content": "Connect your class group with the Add bot button. Run /group_setup in the group."},
+    ])))
+
+    reply = asyncio.run(worker._private_group_setup_followup(
+        database, {"from": {"id": 77}}, "77", "ive linked it", 1234,
+    ))
+
+    assert reply is not None
+    assert "confirm" in reply.casefold()
+    assert "/group_setup" in reply
+    assert "You have linked the group" not in reply
+
+
+def test_private_course_name_after_setup_help_is_routed_back_to_group_setup(monkeypatch):
+    worker = load_worker(monkeypatch)
+    database = FakeDatabase()
+    monkeypatch.setattr(worker.course_tutor_service, "_read_tutor_context", AsyncMock(return_value=("", [
+        {"role": "user", "content": "How do I connect my class group to this bot?"},
+        {"role": "assistant", "content": "Connect your class group with the Add bot button. Run /group_setup in the group."},
+    ])))
+
+    reply = asyncio.run(worker._private_group_setup_followup(
+        database, {"from": {"id": 77}}, "77", "math", 1234,
+    ))
+
+    assert reply is not None
+    assert "/group_setup" in reply
+    assert "private chat" in reply.casefold()
+
+
+def test_private_group_setup_confirmation_reports_only_a_saved_group(monkeypatch):
+    worker = load_worker(monkeypatch)
+    database = FakeDatabase()
+    database.statement_results = {"results": [{"group_title": "Section G", "current_semester": "Fall 2026"}]}
+    monkeypatch.setattr(worker.course_tutor_service, "_read_tutor_context", AsyncMock(return_value=("", [
+        {"role": "user", "content": "How do I connect my class group to this bot?"},
+        {"role": "assistant", "content": "Connect your class group with the Add bot button. Run /group_setup in the group."},
+    ])))
+
+    reply = asyncio.run(worker._private_group_setup_followup(
+        database, {"from": {"id": 77}}, "77", "I've linked it", 1234,
+    ))
+
+    assert reply is not None
+    assert "Section G" in reply
+    assert "if that’s the group" in reply.casefold()
+    assert "college invite" not in reply.casefold()
+
+
+def test_recurring_request_returns_an_explicit_reply_instead_of_disappearing(monkeypatch):
+    worker = load_worker(monkeypatch)
+    database = FakeDatabase()
+
+    reply = asyncio.run(worker._handle_private_task_message(
+        database,
+        55,
+        {"from": {"id": 77}},
+        {"type": "private"},
+        "Every 5 min tell me a fact about our universe",
+        1_800_000_000_000,
+        None,
+    ))
+
+    assert reply is not None
+    assert "repeating request" in reply.text.casefold()
+    assert "not available yet" in reply.text.casefold()
+    assert "home:add_reminder" in str(reply.reply_markup)
 
 
 def test_regular_study_question_skips_task_intent_model(monkeypatch):

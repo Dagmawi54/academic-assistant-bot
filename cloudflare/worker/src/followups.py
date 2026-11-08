@@ -10,7 +10,7 @@ import course_tutor_ai
 logger = logging.getLogger("academic_assistant_followups")
 
 MAX_SUGGESTIONS = 3
-LABEL_CHARS = 10
+LABEL_CHARS = 22
 QUESTION_CHARS = 200
 TTL_MS = 24 * 3600 * 1000
 CONTINUE_PROMPT = (
@@ -39,23 +39,56 @@ def parse_suggestions(raw: str) -> list[dict]:
 
 
 def _button_label(label: str, question: str) -> str:
-    """Use short, readable actions; keep the full contextual question behind the button."""
+    """Keep an action and its topic visible on the Telegram button."""
     normalized = f"{label} {question}".casefold()
-    if re.search(r"\b(?:why|cause|reason|how does|how do)\b", normalized):
-        return "Why?"
-    if re.search(r"\b(?:example|examples|for instance|sample|demonstrate)\b", normalized):
-        return "Example"
-    if re.search(r"\b(?:pitfall|mistake|edge case|what goes wrong|when does .* fail)\b", normalized):
-        return "Pitfall"
-    if re.search(r"\b(?:apply|use this|try|work through|walk through|trace|calculate|compute)\b", normalized):
-        return "Apply"
-    if re.search(r"\b(?:compare|difference|versus|vs)\b", normalized):
-        return "Compare"
-    if re.search(r"\b(?:check|understand|mistake|quiz|test yourself)\b", normalized):
-        return "Check"
-    if re.search(r"\bwhat if\b", normalized):
-        return "What if?"
-    return "Explore"
+    action = "Explore"
+    for pattern, value in (
+        (r"\b(?:why|cause|reason|how does|how do)\b", "Why"),
+        (r"\b(?:example|examples|for instance|sample|demonstrate)\b", "Example"),
+        (r"\b(?:pitfall|mistake|edge case|what goes wrong|when does .* fail)\b", "Pitfall"),
+        (r"\b(?:apply|use this|try|work through|walk through|trace|calculate|compute)\b", "Apply"),
+        (r"\b(?:compare|difference|versus|vs)\b", "Compare"),
+        (r"\b(?:check|understand|quiz|test yourself|evidence)\b", "Check"),
+        (r"\bwhat if\b", "What if"),
+    ):
+        if re.search(pattern, normalized):
+            action = value
+            break
+
+    ignored = set(course_tutor_ai._STOPWORDS) | set(course_tutor_ai._CUE_WORDS) | {
+        "example", "examples", "evidence", "result", "results", "effect", "effects",
+        "reason", "reasons", "application", "applications", "difference", "differences",
+        "mistake", "mistakes", "check", "understand", "understanding", "question",
+        "support", "cause", "show", "describe", "explain", "apply", "calculate",
+        "work", "keep", "different", "relationship", "between", "given", "following",
+        "why", "how", "what", "does", "doe", "did", "do", "is", "are", "was", "were",
+        "can", "could", "would", "should", "will", "the", "and", "for", "with",
+        "from", "you", "your", "this", "that", "it", "its", "our", "their",
+    }
+    # Preserve original spelling while using the tutor's stop-word rules to find a compact topic.
+    raw_terms = re.findall(r"[A-Za-z0-9]+(?:['’][A-Za-z0-9]+)?", question)
+    topic_terms = []
+    for term in raw_terms:
+        stem = course_tutor_ai._stem(course_tutor_ai._norm(term))
+        if stem and stem not in ignored and len(stem) >= 3:
+            topic_terms.append(term)
+    # Preserve proper-name concepts such as “Big Bang” and “Hubble's Law” as a unit.
+    proper_phrase = next((
+        [raw_terms[index], raw_terms[index + 1]]
+        for index in range(1, len(raw_terms) - 1)
+        if raw_terms[index][:1].isupper() and raw_terms[index + 1][:1].isupper()
+    ), [])
+    if proper_phrase:
+        topic_terms = proper_phrase
+    elif any(word in normalized for word in ("evidence", "example", "apply", "compare", "check")) and len(topic_terms) > 1:
+        topic_terms = topic_terms[-2:]
+    topic = " ".join(topic_terms[:2])
+    candidate = f"{action}: {topic}" if topic else action
+    while len(candidate) > LABEL_CHARS and topic_terms:
+        topic_terms.pop()
+        topic = " ".join(topic_terms[:2])
+        candidate = f"{action}: {topic}" if topic else action
+    return candidate.rstrip()
 
 
 def _relevant_suggestions(items: list[dict], question: str, answer: str) -> list[dict]:
@@ -101,7 +134,8 @@ async def suggest(ai_binding, question: str, answer_html: str) -> list[dict]:
             "something the answer already covered. Each full question must name or clearly refer to one concept from "
             "the supplied answer. Prefer one why/how question, one worked-example question, and one understanding "
             "check when they fit; omit a type if it would be forced or unrelated. Output one line per question: "
-            "short action label | full natural question. Labels must be 10 characters or fewer. No numbering or extra text. "
+            "short contextual label | full natural question. Labels should include the topic (for example, `Why: Hubble's law`) "
+            "and stay within 22 characters. Avoid generic labels such as Why, Check, or Explore alone. No numbering or extra text. "
             "Reply in the student's language."
         )},
         {"role": "user", "content": json.dumps({"student_question": str(question)[:300], "answer": excerpt}, ensure_ascii=False)},
@@ -147,12 +181,19 @@ async def load(database, user_id, chat_id, now_ms: int, key: str) -> list[dict]:
         return []
 
 
-def keyboard(items: list[dict], lesson_url: str | None = None, truncated: bool = False, key: str = "") -> dict | None:
+def keyboard(
+    items: list[dict], lesson_url: str | None = None, truncated: bool = False,
+    key: str = "", guided_lesson: bool = False,
+) -> dict | None:
     rows: list[list[dict]] = []
     if truncated:
-        rows.append([{"text": "▶️ Continue", "callback_data": "fu:c:0"}])
-    for index, item in enumerate(items[:MAX_SUGGESTIONS]):
-        rows.append([{"text": f"💬 {item['label'][:LABEL_CHARS]}", "callback_data": f"fu:s:{key}:{index}"}])
+        callback = "fu:g:t" if guided_lesson else "fu:c:0"
+        rows.append([{"text": "▶️ Continue", "callback_data": callback}])
+    elif guided_lesson:
+        rows.append([
+            {"text": "➡️ Next part", "callback_data": "fu:g:n"},
+            {"text": "🔄 Explain again", "callback_data": "fu:g:e"},
+        ])
     if lesson_url:
         rows.append([{"text": "📖 Open visual lesson", "url": lesson_url}])
     return {"inline_keyboard": rows} if rows else None

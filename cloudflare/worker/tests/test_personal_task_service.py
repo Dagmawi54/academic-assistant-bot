@@ -169,6 +169,15 @@ def test_task_heuristic_only_classifies_clear_personal_task_language():
     assert not service.looks_like_task_request("Explain task scheduling in operating systems")
 
 
+def test_recurring_fact_request_is_caught_before_the_tutor_can_silently_swallow_it():
+    request = "Every 5 min tell me a fact about our universe"
+    assert service.looks_like_task_request(request)
+    intent = asyncio.run(service.parse_task_intent(
+        None, request, "Africa/Addis_Ababa", 1_800_000_000_000
+    ))
+    assert intent.action == "unsupported_recurring"
+
+
 def test_relative_reminder_after_two_minutes_is_handled_without_ai():
     class NeverCallAi:
         async def run(self, *_args, **_kwargs):

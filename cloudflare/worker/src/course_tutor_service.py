@@ -20,7 +20,11 @@ MAX_TUTOR_REQUESTS_PER_MONTH = 3_000
 TUTOR_USAGE_LIMITS_ENABLED = False
 MAX_TUTOR_MEMORY_EXCHANGES = 8
 MAX_TUTOR_MEMORY_MESSAGE_CHARS = 2_000
-MAX_TUTOR_PREFERENCES_CHARS = 1_000
+MAX_TUTOR_PREFERENCES_CHARS = 29_000
+MAX_TUTOR_PREFERENCE_ENTRY_CHARS = 4_000
+MAX_TUTOR_PERSONALITIES = 6
+MAX_TUTOR_PERSONALITY_NAME_CHARS = 50
+MAX_TUTOR_PERSONALITY_INSTRUCTIONS_CHARS = 4_000
 PRIVATE_TUTOR_CONTEXT = "private"
 logger = logging.getLogger("academic_assistant_tutor")
 
@@ -32,6 +36,7 @@ class TutorReply:
     text: str
     lesson_url: str
     truncated: bool = False
+    guided_lesson: bool = False
 
     @property
     def reply_markup(self) -> dict:
@@ -240,13 +245,69 @@ async def get_tutor_preferences(database, user_id: int) -> str:
     row = await database.prepare(
         "SELECT study_preferences FROM tutor_user_profiles WHERE user_id = ?"
     ).bind(int(user_id)).first()
-    return str((row or {}).get("study_preferences") or "")
+    base_preference = str((row or {}).get("study_preferences") or "").strip()
+    try:
+        personalities = await list_tutor_personalities(database, user_id)
+    except Exception:
+        logger.exception("tutor_personality_load_failed user_id=%s", user_id)
+        personalities = []
+    sections = []
+    if base_preference:
+        sections.append("Base study preference:\n" + base_preference)
+    if personalities:
+        sections.append(
+            "Saved tutor personalities (all coexist; combine compatible style notes instead of replacing one with another):\n"
+            + "\n".join(f"- {item['name']}: {item['instructions']}" for item in personalities)
+        )
+    return "\n\n".join(sections)[:MAX_TUTOR_PREFERENCES_CHARS]
+
+
+async def list_tutor_personalities(database, user_id: int) -> list[dict]:
+    result = await database.prepare(
+        "SELECT id, name, instructions, created_at_ms, updated_at_ms FROM tutor_personalities WHERE user_id = ? ORDER BY created_at_ms, id LIMIT ?"
+    ).bind(int(user_id), MAX_TUTOR_PERSONALITIES + 1).all()
+    return list((result or {}).get("results") or [])
+
+
+async def add_tutor_personality(
+    database, user_id: int, name: str, instructions: str, now_ms: int
+) -> dict:
+    normalized_name = re.sub(r"\s+", " ", str(name or "")).strip()
+    normalized_instructions = str(instructions or "").strip()
+    if type(user_id) is not int or user_id <= 0:
+        return {"status": "invalid"}
+    if not 1 <= len(normalized_name) <= MAX_TUTOR_PERSONALITY_NAME_CHARS:
+        return {"status": "invalid_name"}
+    if not 1 <= len(normalized_instructions) <= MAX_TUTOR_PERSONALITY_INSTRUCTIONS_CHARS:
+        return {"status": "invalid_instructions"}
+    name_key = normalized_name.casefold()
+    count = await database.prepare(
+        "SELECT COUNT(*) AS personality_count FROM tutor_personalities WHERE user_id = ?"
+    ).bind(user_id).first()
+    if int((count or {}).get("personality_count") or 0) >= MAX_TUTOR_PERSONALITIES:
+        return {"status": "limit"}
+    row = await database.prepare(
+        """
+        INSERT INTO tutor_personalities (user_id, name, name_key, instructions, created_at_ms, updated_at_ms)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(user_id, name_key) DO NOTHING
+        RETURNING id, name, instructions
+        """
+    ).bind(user_id, normalized_name, name_key, normalized_instructions, int(now_ms), int(now_ms)).first()
+    return {"status": "saved", **row} if row else {"status": "duplicate"}
+
+
+async def delete_tutor_personality(database, user_id: int, personality_id: int) -> bool:
+    row = await database.prepare(
+        "DELETE FROM tutor_personalities WHERE id = ? AND user_id = ? RETURNING id"
+    ).bind(int(personality_id), int(user_id)).first()
+    return bool(row)
 
 
 async def set_tutor_preferences(
     database, user_id: int, preferences: str, now_ms: int
 ) -> str:
-    normalized = str(preferences or "").strip()[:MAX_TUTOR_PREFERENCES_CHARS]
+    normalized = str(preferences or "").strip()[:MAX_TUTOR_PREFERENCE_ENTRY_CHARS]
     await database.prepare(
         """
         INSERT INTO tutor_user_profiles (user_id, study_preferences, updated_at_ms)
@@ -277,6 +338,19 @@ async def load_tutor_memory(
     ]
 
 
+async def has_guided_lesson_checkpoint(database, user_id: int, chat_id: str, context_key: str) -> bool:
+    """Whether this conversation's latest tutor message is waiting for a lesson navigation reply."""
+    try:
+        history = await load_tutor_memory(database, user_id, chat_id, context_key)
+    except Exception:
+        return False
+    last_assistant = next((turn for turn in reversed(history) if turn.get("role") == "assistant"), None)
+    return bool(
+        last_assistant
+        and course_tutor_ai._GUIDED_CHECKPOINT_MARKER in str(last_assistant.get("content") or "")
+    )
+
+
 async def save_tutor_exchange(
     database,
     user_id: int,
@@ -290,9 +364,14 @@ async def save_tutor_exchange(
         if role == "assistant":
             # A digest keeps whole paragraphs and lists the sections already taught, so a
             # follow-up like "go deeper" builds on the answer instead of repeating it.
+            guided = bool(getattr(answer, "guided_lesson", False))
             bounded_content = course_tutor_ai.compact_answer_for_memory(
-                content, MAX_TUTOR_MEMORY_MESSAGE_CHARS
+                content,
+                MAX_TUTOR_MEMORY_MESSAGE_CHARS
+                - (len(course_tutor_ai._GUIDED_CHECKPOINT_MARKER) + 1 if guided else 0),
             )
+            if guided:
+                bounded_content = course_tutor_ai._GUIDED_CHECKPOINT_MARKER + "\n" + bounded_content
         else:
             bounded_content = str(content or "").strip()[:MAX_TUTOR_MEMORY_MESSAGE_CHARS]
         if not bounded_content:
@@ -329,6 +408,12 @@ async def forget_tutor_user(database, user_id: int) -> None:
     await database.prepare(
         "DELETE FROM tutor_user_profiles WHERE user_id = ?"
     ).bind(int(user_id)).run()
+    try:
+        await database.prepare(
+            "DELETE FROM tutor_personalities WHERE user_id = ?"
+        ).bind(int(user_id)).run()
+    except Exception:
+        logger.exception("tutor_personality_delete_failed user_id=%s", user_id)
     for table in ("tutor_documents", "tutor_followups"):
         try:
             await database.prepare(f"DELETE FROM {table} WHERE user_id = ?").bind(int(user_id)).run()
@@ -459,6 +544,7 @@ async def answer_course_question(
         question, answer, now_ms,
     )
     truncated = bool(getattr(answer, "truncated", False))
+    guided_lesson = bool(getattr(answer, "guided_lesson", False))
     material_sources = []
     for passage in passages:
         material_sources.append({"title": passage["title"], "message_link": passage.get("message_link")})
@@ -485,7 +571,7 @@ async def answer_course_question(
                 logger.warning("course_visual_lesson_create_failed: %s", type(lesson_url).__name__)
                 lesson_url = None
             if lesson_url:
-                return TutorReply(_hide_chat_source_list(response), lesson_url, truncated)
+                return TutorReply(_hide_chat_source_list(response), lesson_url, truncated, guided_lesson)
         except Exception:
             logger.exception("course_visual_lesson_create_failed")
     if not offer_lesson:
@@ -493,7 +579,7 @@ async def answer_course_question(
             await save_task
         except Exception:
             pass
-    return course_tutor_ai.tag_text(response, truncated)
+    return course_tutor_ai.tag_text(response, truncated, guided_lesson)
 
 
 async def answer_general_question(
@@ -563,6 +649,7 @@ async def answer_general_question(
         stored_question, answer, now_ms,
     )
     truncated = bool(getattr(answer, "truncated", False))
+    guided_lesson = bool(getattr(answer, "guided_lesson", False))
     response = course_tutor_ai.render_general_tutor_answer(
         answer,
         web_sources,
@@ -588,7 +675,7 @@ async def answer_general_question(
                 logger.warning("general_visual_lesson_create_failed: %s", type(lesson_url).__name__)
                 lesson_url = None
             if lesson_url:
-                return TutorReply(_hide_chat_source_list(response), lesson_url, truncated)
+                return TutorReply(_hide_chat_source_list(response), lesson_url, truncated, guided_lesson)
         except Exception:
             logger.exception("general_visual_lesson_create_failed")
     if not (
@@ -599,7 +686,7 @@ async def answer_general_question(
             await save_task
         except Exception:
             pass
-    return course_tutor_ai.tag_text(response, truncated)
+    return course_tutor_ai.tag_text(response, truncated, guided_lesson)
 
 
 def _lesson_question(question: str, request) -> str:

@@ -375,6 +375,11 @@ class BudgetTests(unittest.TestCase):
     def test_simple_factual_question_is_brief(self):
         self.assertEqual(self.budget("What is DNS?"), ai.TUTOR_BRIEF_COMPLETION_TOKENS)
 
+    def test_short_word_meaning_question_is_brief_and_has_no_visual_lesson(self):
+        question = "What does veil mean?"
+        self.assertEqual(self.budget(question), ai.TUTOR_BRIEF_COMPLETION_TOKENS)
+        self.assertFalse(ai.should_offer_visual_lesson(question, "A veil is a covering."))
+
     def test_complex_conceptual_question_is_standard(self):
         self.assertEqual(self.budget("Explain how virtual memory and paging work"), ai.TUTOR_STANDARD_COMPLETION_TOKENS)
 
@@ -525,9 +530,9 @@ class ScreenshotRegressionTests(unittest.TestCase):
     def test_spoiler_never_hides_a_label_or_emoji(self):
         for text in ("||📝|| Practice Question: what is 2+2?", "||Practice Question|| what is 2+2?", "||🎯||"):
             self.assertNotIn("tg-spoiler", ai.markdown_to_telegram_html(text), text)
-        self.assertIn("<tg-spoiler>x = 5</tg-spoiler>", ai.markdown_to_telegram_html("Answer: ||x = 5||"))
-        self.assertIn("<tg-spoiler>7</tg-spoiler>", ai.markdown_to_telegram_html("Answer: ||7||"))
-        self.assertEqual(ai.markdown_to_telegram_html("||19 % 8 = 3||"), "<tg-spoiler>19 % 8 = 3</tg-spoiler>")
+        self.assertEqual(ai.markdown_to_telegram_html("Answer: ||x = 5||"), "Answer: x = 5")
+        self.assertEqual(ai.markdown_to_telegram_html("Answer: ||7||"), "Answer: 7")
+        self.assertEqual(ai.markdown_to_telegram_html("||19 % 8 = 3||"), "19 % 8 = 3")
 
     def test_answer_code_is_collapsed_under_its_visible_label(self):
         rendered = ai.markdown_to_telegram_html("**Answer:**\n\n```java\nSystem.out.println(1);\n```")
@@ -685,6 +690,11 @@ class RenderingTests(unittest.TestCase):
         out = self.render("Practice question\nAnswer: The immune system attacks healthy tissue.")
         self.assertIn("<tg-spoiler>The immune system attacks healthy tissue.</tg-spoiler>", out)
 
+    def test_answer_spoilers_are_unwrapped_when_there_is_no_practice_question(self):
+        out = self.render("Answer: ||A barrier that conceals something.||")
+        self.assertNotIn("<tg-spoiler>", out)
+        self.assertIn("A barrier that conceals something.", out)
+
     def test_literal_spoiler_placeholders_from_model_are_removed(self):
         out = self.render("Practice question\nAnswer: spoiler Molecular mimicry is the cause. spoiler")
         self.assertNotIn("spoiler molecular", out.casefold())
@@ -783,7 +793,7 @@ class RenderingTests(unittest.TestCase):
 
     def test_underline_and_spoiler(self):
         self.assertEqual(self.render("The ++key term++ matters."), "The <u>key term</u> matters.")
-        self.assertEqual(self.render("Answer: ||x = 5||"), "Answer: <tg-spoiler>x = 5</tg-spoiler>")
+        self.assertEqual(self.render("Answer: ||x = 5||"), "Answer: x = 5")
         self.assertEqual(self.render("**++both++**"), "<b><u>both</u></b>")
 
     def test_operators_are_not_mistaken_for_underline_or_spoiler(self):
@@ -910,6 +920,25 @@ class CitationTests(unittest.TestCase):
         out = ai.render_general_tutor_answer("Fact [W1].", self.WEB)
         self.assertIn('<a href="https://doc.rust-lang.org/book/">Rust Book</a>', out)
         self.assertTrue(out.rstrip().endswith("• " + '<a href="https://doc.rust-lang.org/book/">Rust Book</a>'))
+
+    def test_raw_search_titles_and_snippets_are_removed_without_a_copied_url(self):
+        sources = [
+            {
+                "title": "What does a veil over your eyes mean? - Quora",
+                "url": "https://example.org/veil",
+                "content": "What does it mean to go beyond the veil? In some traditions, lifting the veil means gaining access to a higher truth.",
+            }
+        ]
+        out = ai.render_general_tutor_answer(
+            "A veil is a covering that hides something. What does a veil over your eyes mean? - Quora "
+            "What does it mean to go beyond the veil? In some traditions, lifting the veil means gaining access to a higher truth.",
+            sources,
+        )
+        body = out.split("\n\n🌐 <b>Additional sources</b>", 1)[0]
+        self.assertIn("A veil is a covering that hides something.", body)
+        self.assertNotIn("Quora", body)
+        self.assertNotIn("What does it mean to go beyond the veil?", body)
+        self.assertIn("<a href=\"https://example.org/veil\">", out)
 
     def test_unknown_citation_tokens_removed_cleanly(self):
         out = ai.render_general_tutor_answer("Claim [W2]. Another claim [M9].", self.WEB)

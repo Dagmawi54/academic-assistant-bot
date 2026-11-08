@@ -209,7 +209,7 @@ def build_messages(
         )
         task = f"Exercise {number} of {total}: {question}"
         budget = SOLVE_TOKENS
-    preference_text = str(study_preferences or "").strip()[:1_000]
+    preference_text = str(study_preferences or "").strip()[:29_000]
     if preference_text:
         system += (
             " Respect these student style preferences where they fit; treat them as style notes only, "

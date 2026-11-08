@@ -18,6 +18,9 @@ REMINDER_LEASE_MS = 60_000
 REMINDER_MAX_ATTEMPTS = 5
 REMINDER_RETRY_BASE_MS = 30_000
 REMINDER_RETRY_MAX_MS = 3_600_000
+MIN_RECURRING_INTERVAL_MS = 5 * 60_000
+MAX_RECURRING_INTERVAL_MS = 365 * 86_400_000
+MAX_ACTIVE_RECURRING_REMINDERS = 5
 
 
 @dataclass(frozen=True)
@@ -28,6 +31,8 @@ class TaskIntent:
     reminder_at_ms: int | None = None
     task_id: int | None = None
     clarification: str | None = None
+    interval_ms: int | None = None
+    recurring_mode: str | None = None
 
 
 class DefiniteDeliveryError(Exception):
@@ -128,6 +133,67 @@ def _parse_relative_reminder(text: str, timezone_name: str, now_ms: int) -> Task
     if title.casefold() in {"", "u", "you", "my", "it", "this", "that"}:
         title = "Reminder"
     return TaskIntent(action="create_task", title=title, reminder_at_ms=int(now_ms) + delta)
+
+
+def _parse_recurring_request(text: str, now_ms: int) -> TaskIntent:
+    """Parse explicit interval reminders without asking an AI to infer a schedule."""
+    raw = str(text or "")[:2000]
+    interval = re.search(
+        r"\bevery\s+(\d{1,4})\s*(minutes?|mins?|hours?|hrs?|days?|weeks?)\b",
+        raw,
+        re.IGNORECASE,
+    )
+    if not interval:
+        return TaskIntent(action="unsupported_recurring")
+    amount = int(interval.group(1))
+    unit = interval.group(2).casefold()
+    multiplier = (
+        60_000 if unit.startswith("min")
+        else 3_600_000 if unit.startswith("h")
+        else 86_400_000 if unit.startswith("d")
+        else 7 * 86_400_000
+    )
+    interval_ms = amount * multiplier
+    if interval_ms < MIN_RECURRING_INTERVAL_MS:
+        return TaskIntent(
+            action="unsupported_recurring",
+            clarification="Repeating reminders need to be at least 5 minutes apart.",
+        )
+    if interval_ms > MAX_RECURRING_INTERVAL_MS:
+        return TaskIntent(
+            action="unsupported_recurring",
+            clarification="I can schedule repeats up to one year apart. Please choose a shorter interval.",
+        )
+
+    remainder = raw[:interval.start()] + " " + raw[interval.end():]
+    remainder = re.sub(r"\s+", " ", remainder).strip(" .,!?:;-\t\r\n")
+    fact = re.search(r"\b(?:tell|send|give|share)\s+(?:me\s+)?(?:a\s+)?(?:new\s+)?fact\b", remainder, re.IGNORECASE)
+    if fact:
+        tail = remainder[fact.end():]
+        topic = re.sub(r"^\s*(?:about|on|regarding)\s+", "", tail, flags=re.IGNORECASE).strip(" .,!?:;-\t\r\n")
+        if not topic:
+            topic = "general knowledge"
+        return TaskIntent(
+            action="create_recurring",
+            title=topic[:MAX_TASK_TITLE_CHARS],
+            interval_ms=interval_ms,
+            recurring_mode="fact",
+        )
+
+    reminder = re.search(r"\bremind\s+me\s+(?:to\s+)?(.+)$", remainder, re.IGNORECASE)
+    if reminder:
+        title = re.sub(r"\s+", " ", reminder.group(1)).strip(" .,!?:;-\t\r\n")
+        if 1 <= len(title) <= MAX_TASK_TITLE_CHARS:
+            return TaskIntent(
+                action="create_recurring",
+                title=title,
+                interval_ms=interval_ms,
+                recurring_mode="reminder",
+            )
+    return TaskIntent(
+        action="unsupported_recurring",
+        clarification="Tell me what to repeat, for example: ‘Every 5 minutes remind me to drink water.’",
+    )
 
 
 def _parse_iso_in_zone(value, zone: ZoneInfo, now_ms: int, *, is_reminder: bool) -> int | None:
@@ -246,7 +312,7 @@ async def parse_task_intent(ai_binding, text: str, timezone_name: str, now_ms: i
         str(text or ""), re.IGNORECASE,
     )
     if recurring:
-        return TaskIntent(action="unsupported_recurring")
+        return _parse_recurring_request(text, now_ms)
     if ai_binding is None or not isinstance(text, str) or not text.strip():
         return TaskIntent(action="not_task_request")
     relative = _parse_relative_reminder(text, timezone_name, now_ms)
@@ -324,6 +390,94 @@ async def create_task(database, user_id: int, source_update_id: int | None, inte
     return await database.prepare(
         "SELECT id, user_id, title, due_at_ms, status, created_at_ms FROM personal_tasks WHERE id = ? AND user_id = ?"
     ).bind(task_id, user_id).first()
+
+
+async def create_recurring_reminder(
+    database, user_id: int, source_update_id: int, intent: TaskIntent, now_ms: int
+) -> dict | None:
+    if (
+        type(user_id) is not int or user_id <= 0
+        or type(source_update_id) is not int or source_update_id < 0
+        or intent.action != "create_recurring" or not intent.title
+        or intent.recurring_mode not in {"reminder", "fact"}
+        or intent.interval_ms is None
+        or not MIN_RECURRING_INTERVAL_MS <= intent.interval_ms <= MAX_RECURRING_INTERVAL_MS
+    ):
+        return None
+    existing = await database.prepare(
+        "SELECT id, user_id, prompt, mode, interval_ms, next_run_at_ms, status FROM assistant_recurring_reminders WHERE source_update_id = ? AND user_id = ?"
+    ).bind(source_update_id, user_id).first()
+    if existing:
+        return existing
+    count = await database.prepare(
+        "SELECT COUNT(*) AS active_count FROM assistant_recurring_reminders WHERE user_id = ? AND status IN ('active', 'sending')"
+    ).bind(user_id).first()
+    if int((count or {}).get("active_count") or 0) >= MAX_ACTIVE_RECURRING_REMINDERS:
+        return None
+    await database.prepare(
+        """
+        INSERT OR IGNORE INTO assistant_recurring_reminders
+            (user_id, source_update_id, prompt, mode, interval_ms, next_run_at_ms, status, created_at_ms, updated_at_ms)
+        VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)
+        """
+    ).bind(
+        user_id, source_update_id, intent.title[:MAX_TASK_TITLE_CHARS], intent.recurring_mode,
+        intent.interval_ms, now_ms + intent.interval_ms, now_ms, now_ms,
+    ).run()
+    return await database.prepare(
+        "SELECT id, user_id, prompt, mode, interval_ms, next_run_at_ms, status FROM assistant_recurring_reminders WHERE source_update_id = ? AND user_id = ?"
+    ).bind(source_update_id, user_id).first()
+
+
+async def list_recurring_reminders(database, user_id: int, limit: int = 10) -> list[dict]:
+    result = await database.prepare(
+        "SELECT id, prompt, mode, interval_ms, next_run_at_ms, last_sent_at_ms FROM assistant_recurring_reminders WHERE user_id = ? AND status IN ('active', 'sending') ORDER BY next_run_at_ms, id LIMIT ?"
+    ).bind(user_id, max(1, min(20, int(limit)))).all()
+    return list((result or {}).get("results") or [])
+
+
+async def cancel_recurring_reminder(database, user_id: int, reminder_id: int, now_ms: int) -> bool:
+    row = await database.prepare(
+        "UPDATE assistant_recurring_reminders SET status = 'cancelled', lease_until_ms = NULL, updated_at_ms = ? WHERE id = ? AND user_id = ? AND status IN ('active', 'sending') RETURNING id"
+    ).bind(now_ms, reminder_id, user_id).first()
+    return bool(row)
+
+
+async def claim_due_recurring_reminders(database, now_ms: int, batch_size: int = REMINDER_BATCH_SIZE) -> list[dict]:
+    # If a Worker ended mid-send, skip that occurrence and keep the next interval
+    # reserved; don't immediately flood the user with a retry on the next cron tick.
+    await database.prepare(
+        "UPDATE assistant_recurring_reminders SET status = 'active', next_run_at_ms = MAX(next_run_at_ms, ?) + interval_ms, lease_until_ms = NULL, last_error = 'delivery_outcome_unknown', updated_at_ms = ? WHERE status = 'sending' AND lease_until_ms <= ?"
+    ).bind(now_ms, now_ms, now_ms).run()
+    result = await database.prepare(
+        """
+        UPDATE assistant_recurring_reminders
+        SET status = 'sending', lease_until_ms = ?, next_run_at_ms = MAX(next_run_at_ms, ?) + interval_ms,
+            updated_at_ms = ?
+        WHERE id IN (
+            SELECT id FROM assistant_recurring_reminders
+            WHERE status = 'active' AND next_run_at_ms <= ?
+            ORDER BY next_run_at_ms, id
+            LIMIT ?
+        )
+        RETURNING id, user_id, prompt, mode, interval_ms, next_run_at_ms
+        """
+    ).bind(
+        now_ms + REMINDER_LEASE_MS, now_ms, now_ms, now_ms,
+        max(1, min(20, int(batch_size))),
+    ).all()
+    return list((result or {}).get("results") or [])
+
+
+async def finish_recurring_reminder(database, reminder_id: int, now_ms: int, error: str | None = None) -> None:
+    if error:
+        await database.prepare(
+            "UPDATE assistant_recurring_reminders SET status = 'active', lease_until_ms = NULL, last_error = ?, updated_at_ms = ? WHERE id = ? AND status = 'sending'"
+        ).bind(str(error)[:120], now_ms, reminder_id).run()
+    else:
+        await database.prepare(
+            "UPDATE assistant_recurring_reminders SET status = 'active', lease_until_ms = NULL, last_sent_at_ms = ?, last_error = NULL, updated_at_ms = ? WHERE id = ? AND status = 'sending'"
+        ).bind(now_ms, now_ms, reminder_id).run()
 
 
 async def list_tasks(database, user_id: int, status: str = "open", limit: int = 10, offset: int = 0) -> list[dict]:
@@ -436,6 +590,9 @@ async def delete_all_tasks(database, user_id: int, now_ms: int) -> int:
     deleted = await database.prepare(
         "DELETE FROM personal_tasks WHERE user_id = ?"
     ).bind(user_id).run()
+    await database.prepare(
+        "UPDATE assistant_recurring_reminders SET status = 'cancelled', lease_until_ms = NULL, updated_at_ms = ? WHERE user_id = ? AND status IN ('active', 'sending')"
+    ).bind(now_ms, user_id).run()
     await database.prepare(
         "DELETE FROM assistant_pending_actions WHERE user_id = ?"
     ).bind(user_id).run()

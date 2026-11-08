@@ -178,6 +178,7 @@ if __name__ == "__main__":
 
 
 import followups  # noqa: E402
+followups.course_tutor_ai = course_tutor_ai  # The tutor quality loader stubs sibling modules.
 
 
 class FollowupTests(unittest.TestCase):
@@ -189,6 +190,20 @@ class FollowupTests(unittest.TestCase):
         self.assertEqual([r[0]["callback_data"] for r in kb["inline_keyboard"]], ["fu:s:a1b2:0", "fu:s:a1b2:1", "fu:s:a1b2:2"])
         self.assertTrue(all(len(r[0]["text"]) <= 24 for r in kb["inline_keyboard"]))
         self.assertNotIn("Continue", str(kb))
+
+    def test_followup_button_labels_keep_the_topic_and_avoid_generic_actions(self):
+        items = followups.parse_suggestions(
+            "Why | Why does the universe keep expanding?\n"
+            "Check | What evidence supports the Big Bang?"
+        )
+        self.assertEqual(len(items), 2)
+        self.assertIn("universe", items[0]["label"].casefold())
+        self.assertIn("big", items[1]["label"].casefold())
+        self.assertIn("bang", items[1]["label"].casefold())
+        self.assertNotIn(items[0]["label"], {"Why?", "Check"})
+        self.assertNotIn(items[1]["label"], {"Why?", "Check"})
+        self.assertLessEqual(len(f"💬 {items[0]['label']}"), 24)
+        self.assertLessEqual(len(f"💬 {items[1]['label']}"), 24)
 
     def test_continue_only_when_truncated(self):
         self.assertIn("fu:c:0", str(followups.keyboard([], None, truncated=True)))
@@ -207,7 +222,9 @@ class FollowupTests(unittest.TestCase):
             "Hubble's Law relates a galaxy's distance to its recession velocity.",
         )
 
-        self.assertEqual([item["label"] for item in filtered], ["Check", "Example"])
+        self.assertEqual(len(filtered), 2)
+        self.assertTrue(filtered[0]["label"].startswith("Check:"))
+        self.assertTrue(filtered[1]["label"].startswith("Example:"))
 
     def test_suggest_uses_model_and_roundtrips_storage(self):
         class Ai:
