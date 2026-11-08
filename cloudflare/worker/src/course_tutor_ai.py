@@ -216,6 +216,23 @@ def should_search_web(question: str) -> bool:
     return bool(educational_or_lookup_intent or raw.rstrip().endswith("?"))
 
 
+_SHORT_REPLY_INSTRUCTION = re.compile(
+    r"^\s*(?:please\s+)?(?:reply|respond|answer|say)\s+(?:with\s+)?(?:just|only)\s+"
+    r"[\"'`“”]?([a-z0-9][a-z0-9 _'-]{0,39}?)[\"'`“”]?"
+    r"(?:\s+(?:to|so|because|for)\b.*)?[.!?]*\s*$",
+    re.IGNORECASE,
+)
+
+
+def explicit_short_reply(question: str) -> str | None:
+    """Honor simple, constrained reply requests without invoking the tutor model."""
+    match = _SHORT_REPLY_INSTRUCTION.fullmatch(str(question or ""))
+    if not match:
+        return None
+    response = match.group(1).strip(" \t.,!?;:'\"`“”")
+    return response[:40] or None
+
+
 def should_offer_visual_lesson(question: str, answer: str = "") -> bool:
     """Offer a shareable lesson only for explicit study requests with substantial answers."""
     normalized = re.sub(r"[^a-z0-9 ]", "", str(question or "").casefold()).strip()

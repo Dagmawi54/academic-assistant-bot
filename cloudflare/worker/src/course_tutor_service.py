@@ -599,6 +599,9 @@ async def answer_general_question(
         return "Send a study question, or use <code>/ask your question</code>."
     if len(question) > course_tutor_ai.MAX_QUERY_CHARS:
         return f"Keep your question under {course_tutor_ai.MAX_QUERY_CHARS} characters so I can answer it accurately."
+    short_reply = course_tutor_ai.explicit_short_reply(question)
+    if short_reply is not None:
+        return short_reply
     if ai_binding is None:
         return "The tutor is temporarily unavailable. Please try again shortly."
     if not await consume_tutor_request_budget(database, str(chat_id), int(user_id), now_ms):
