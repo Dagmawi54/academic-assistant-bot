@@ -217,19 +217,26 @@ def should_search_web(question: str) -> bool:
 
 
 def should_offer_visual_lesson(question: str, answer: str = "") -> bool:
-    """Offer a shareable lesson for explicit study requests and substantial answers."""
+    """Offer a shareable lesson only for explicit study requests with substantial answers."""
     normalized = re.sub(r"[^a-z0-9 ]", "", str(question or "").casefold()).strip()
     if _is_small_talk(normalized):
         return False
-    # Search intent alone is not enough: conversational replies can contain words
-    # such as "latest" or "current" (for example, "is the latest deploy working?").
-    # Only attach a lesson when the answer itself has enough teaching content to
-    # make that extra destination useful.
+    # A conversational/support request can contain words such as "latest" or
+    # "current" without asking to learn anything. Require a clear learning action
+    # as well as enough answer content before creating or linking a lesson page.
+    learning_intent = re.search(
+        r"\b(?:explain|teach|define|describe|summari[sz]e|compare|contrast|solve|calculate|"
+        r"prove|derive|analy[sz]e|research|write|debug|implement|code|program|algorithm|"
+        r"formula|equation|concept|meaning|syntax|tutorial|lesson|theory|definition|example|"
+        r"difference|types of|steps of|tell me about|help me understand|"
+        r"what (?:is|are|was|were|does|do|means)|why (?:is|are|does|do)|how (?:does|do|is|are|to))\b",
+        normalized,
+    )
+    if not learning_intent:
+        return False
     if len(str(answer or "").strip()) < 450:
         return False
-    if should_search_web(question):
-        return True
-    return len(normalized.split()) >= 3
+    return True
 
 
 def parse_search_results(payload) -> list[dict[str, str]]:
