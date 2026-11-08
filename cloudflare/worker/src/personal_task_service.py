@@ -88,6 +88,31 @@ def _clarify(question: str = "What date and time should I use for that reminder?
     return TaskIntent(action="clarification", clarification=question)
 
 
+def _parse_relative_reminder(text: str, timezone_name: str, now_ms: int) -> TaskIntent | None:
+    """Safely handle explicit short relative reminders without a model round-trip."""
+    match = re.search(r"\b(?:in|after)\s+(\d{1,4})\s*(minutes?|mins?|hours?|hrs?|days?)\b", text, re.IGNORECASE)
+    if not match:
+        return None
+    amount = int(match.group(1))
+    unit = match.group(2).casefold()
+    multiplier = 60_000 if unit.startswith(("min",)) else 3_600_000 if unit.startswith("h") else 86_400_000
+    delta = amount * multiplier
+    if amount <= 0 or delta > 365 * 86_400_000:
+        return None
+    try:
+        get_timezone(timezone_name)
+    except ValueError:
+        timezone_name = DEFAULT_TIMEZONE
+    remainder = text[:match.start()] + " " + text[match.end():]
+    remainder = re.sub(r"\b(?:can|could|would)\s+(?:you|u)\s+", " ", remainder, flags=re.IGNORECASE)
+    remainder = re.sub(r"\b(?:please|put|set|add|create|make|a|an|the|personal|task|tasks|reminder|reminders|for|me|to|remind)\b", " ", remainder, flags=re.IGNORECASE)
+    title = re.sub(r"[^\w\s'-]", " ", remainder, flags=re.UNICODE)
+    title = re.sub(r"\s+", " ", title).strip(" -'\t\r\n")[:MAX_TASK_TITLE_CHARS]
+    if title.casefold() in {"", "u", "you", "my", "it", "this", "that"}:
+        title = "Reminder"
+    return TaskIntent(action="create_task", title=title, reminder_at_ms=int(now_ms) + delta)
+
+
 def _parse_iso_in_zone(value, zone: ZoneInfo, now_ms: int, *, is_reminder: bool) -> int | None:
     if not isinstance(value, str) or not 10 <= len(value) <= 40:
         return None
@@ -200,6 +225,9 @@ async def parse_task_intent(ai_binding, text: str, timezone_name: str, now_ms: i
     """Ask the existing Workers AI binding to classify a possible private task request."""
     if ai_binding is None or not isinstance(text, str) or not text.strip():
         return TaskIntent(action="not_task_request")
+    relative = _parse_relative_reminder(text, timezone_name, now_ms)
+    if relative is not None and re.search(r"\b(?:remind|reminder)\b", text, re.IGNORECASE):
+        return relative
     try:
         zone = get_timezone(timezone_name)
     except ValueError:

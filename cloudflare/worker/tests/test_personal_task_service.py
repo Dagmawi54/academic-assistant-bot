@@ -169,6 +169,22 @@ def test_task_heuristic_only_classifies_clear_personal_task_language():
     assert not service.looks_like_task_request("Explain task scheduling in operating systems")
 
 
+def test_relative_reminder_after_two_minutes_is_handled_without_ai():
+    class NeverCallAi:
+        async def run(self, *_args, **_kwargs):
+            raise AssertionError("relative reminder should be parsed deterministically")
+
+    now_ms = 1_800_000_000_000
+    intent = asyncio.run(service.parse_task_intent(
+        NeverCallAi(), "Can u put a reminder for me after 2 minutes remind me",
+        "Africa/Addis_Ababa", now_ms,
+    ))
+
+    assert intent.action == "create_task"
+    assert intent.title == "Reminder"
+    assert intent.reminder_at_ms == now_ms + 120_000
+
+
 def test_parse_task_intent_uses_compact_json_only_workers_ai_request():
     binding = AsyncMock()
     binding.run.return_value = {

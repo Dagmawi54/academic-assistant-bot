@@ -3,13 +3,14 @@
 import json
 import logging
 import re
+import secrets
 
 import course_tutor_ai
 
 logger = logging.getLogger("academic_assistant_followups")
 
 MAX_SUGGESTIONS = 3
-LABEL_CHARS = 40
+LABEL_CHARS = 18
 QUESTION_CHARS = 200
 TTL_MS = 24 * 3600 * 1000
 CONTINUE_PROMPT = (
@@ -31,7 +32,7 @@ def parse_suggestions(raw: str) -> list[dict]:
             continue
         label, question = (part.strip(" *`\"") for part in line.split("|", 1))
         if 3 <= len(label) and 8 <= len(question):
-            items.append({"label": label[:LABEL_CHARS], "question": question[:QUESTION_CHARS]})
+            items.append({"label": label[:LABEL_CHARS].rstrip(" .…"), "question": question[:QUESTION_CHARS]})
         if len(items) == MAX_SUGGESTIONS:
             break
     return items
@@ -66,19 +67,25 @@ async def suggest(ai_binding, question: str, answer_html: str) -> list[dict]:
         return []
 
 
-async def save(database, user_id, chat_id, items: list[dict], now_ms: int) -> None:
+def new_key() -> str:
+    return secrets.token_hex(4)
+
+
+async def save(database, user_id, chat_id, items: list[dict], now_ms: int, key: str) -> None:
     await database.prepare(
         """
-        INSERT INTO tutor_followups (user_id, chat_id, items_json, created_at_ms) VALUES (?, ?, ?, ?)
-        ON CONFLICT(user_id, chat_id) DO UPDATE SET items_json = excluded.items_json, created_at_ms = excluded.created_at_ms
+        INSERT INTO tutor_followup_sets (user_id, chat_id, set_key, items_json, created_at_ms)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(user_id, chat_id, set_key) DO UPDATE SET
+            items_json = excluded.items_json, created_at_ms = excluded.created_at_ms
         """
-    ).bind(int(user_id), str(chat_id), json.dumps(items, ensure_ascii=False), int(now_ms)).run()
+    ).bind(int(user_id), str(chat_id), str(key), json.dumps(items, ensure_ascii=False), int(now_ms)).run()
 
 
-async def load(database, user_id, chat_id, now_ms: int) -> list[dict]:
+async def load(database, user_id, chat_id, now_ms: int, key: str) -> list[dict]:
     row = await database.prepare(
-        "SELECT items_json, created_at_ms FROM tutor_followups WHERE user_id = ? AND chat_id = ?"
-    ).bind(int(user_id), str(chat_id)).first()
+        "SELECT items_json, created_at_ms FROM tutor_followup_sets WHERE user_id = ? AND chat_id = ? AND set_key = ?"
+    ).bind(int(user_id), str(chat_id), str(key)).first()
     if not row or int(row["created_at_ms"]) + TTL_MS < int(now_ms):
         return []
     try:
@@ -87,12 +94,12 @@ async def load(database, user_id, chat_id, now_ms: int) -> list[dict]:
         return []
 
 
-def keyboard(items: list[dict], lesson_url: str | None = None, truncated: bool = False) -> dict | None:
+def keyboard(items: list[dict], lesson_url: str | None = None, truncated: bool = False, key: str = "") -> dict | None:
     rows: list[list[dict]] = []
     if truncated:
         rows.append([{"text": "▶️ Continue", "callback_data": "fu:c:0"}])
     for index, item in enumerate(items[:MAX_SUGGESTIONS]):
-        rows.append([{"text": f"💬 {item['label']}", "callback_data": f"fu:s:{index}"}])
+        rows.append([{"text": f"💬 {item['label'][:LABEL_CHARS]}", "callback_data": f"fu:s:{key}:{index}"}])
     if lesson_url:
         rows.append([{"text": "📖 Open visual lesson", "url": lesson_url}])
     return {"inline_keyboard": rows} if rows else None

@@ -581,6 +581,21 @@ class ServiceFlowTests(unittest.TestCase):
     def test_small_talk_still_skips_search(self):
         self.assertFalse(ai.should_search_web("thanks"))
 
+    def test_raw_search_result_urls_are_removed_from_generated_prose(self):
+        source = {"title": "Autoimmune disease overview", "url": "https://example.org/autoimmune", "content": ""}
+        out = ai.render_general_tutor_answer(
+            "Autoimmune disease affects the body. Autoimmune disease overview (https://example.org/autoimmune).",
+            [source],
+        )
+        self.assertNotIn("Autoimmune disease overview (https://example.org/autoimmune)", out)
+        self.assertNotIn("body.).", out)
+        self.assertIn("Additional sources", out)
+
+    def test_general_prompt_allows_natural_social_conversation_and_actual_group_setup(self):
+        system = ai.build_general_tutor_messages("Hi", [])[0]["content"]
+        self.assertIn("Handle casual chat naturally", system)
+        self.assertIn("this bot's setup steps", system)
+
 
 # ----------------------------------------------------------------------------------------------
 # Telegram HTML rendering
@@ -598,6 +613,16 @@ class RenderingTests(unittest.TestCase):
         self.assertIn("<b>Sub</b>", out)
         self.assertIn("<b>Deep</b>", out)
         self.assertNotIn("#", out)
+
+    def test_practice_answer_is_spoilered_even_when_model_omits_markup(self):
+        out = self.render("Practice question\nAnswer: The immune system attacks healthy tissue.")
+        self.assertIn("<tg-spoiler>The immune system attacks healthy tissue.</tg-spoiler>", out)
+
+    def test_literal_spoiler_placeholders_from_model_are_removed(self):
+        out = self.render("Practice question\nAnswer: spoiler Molecular mimicry is the cause. spoiler")
+        self.assertNotIn("spoiler molecular", out.casefold())
+        self.assertNotIn("cause. spoiler", out.casefold())
+        self.assertIn("<tg-spoiler>Molecular mimicry is the cause.</tg-spoiler>", out)
 
     def test_heading_stays_attached_to_its_text(self):
         self.assertIn("<b>▎Section</b>\ntext", self.render("## Section\n\ntext"))

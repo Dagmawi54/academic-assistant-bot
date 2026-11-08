@@ -2782,14 +2782,15 @@ async def _tutor_buttons(database, ai_binding, user_id, chat_id, question, reply
         lesson_url = _instant_view_url(reply.lesson_url, iv_rhash)
         text = reply.text
     items = []
+    key = followups.new_key()
     if isinstance(text, str) and len(text) > 200 and type(user_id) is int:
         items = await followups.suggest(ai_binding, question, text)
         if items:
             try:
-                await followups.save(database, user_id, chat_id, items, now_ms)
+                await followups.save(database, user_id, chat_id, items, now_ms, key)
             except Exception:
                 items = []
-    return text, followups.keyboard(items, lesson_url, truncated)
+    return text, followups.keyboard(items, lesson_url, truncated, key)
 
 
 async def _handle_followup_callback_update(
@@ -2805,14 +2806,22 @@ async def _handle_followup_callback_update(
     if callback.get("id"):
         await answer_telegram_callback(token, str(callback["id"]))
     parts = str(callback.get("data")).split(":")
-    if chat.get("type") != "private" or type(user_id) is not int or str(user_id) != chat_id or len(parts) != 3 or ai_binding is None:
+    if chat.get("type") != "private" or type(user_id) is not int or str(user_id) != chat_id or ai_binding is None:
         return "__QUIZ_HANDLED__"
     send = _batch_sender(token, message)
     if parts[1] == "c":
         question = followups.CONTINUE_PROMPT
     else:
-        items = await followups.load(database, user_id, chat_id, now_ms)
-        index = int(parts[2]) if parts[2].isdigit() else -1
+        # New keyboards carry their immutable answer-set key; the old three-part format is
+        # accepted long enough to give existing messages a clear expiry response.
+        if len(parts) == 4:
+            set_key, raw_index = parts[2], parts[3]
+            items = await followups.load(database, user_id, chat_id, now_ms, set_key)
+        elif len(parts) == 3:
+            raw_index, items = parts[2], []
+        else:
+            raw_index, items = "", []
+        index = int(raw_index) if raw_index.isdigit() else -1
         if not 0 <= index < len(items):
             await send("Those suggestions expired. Just type your question.", None)
             return "__QUIZ_HANDLED__"
@@ -2957,6 +2966,8 @@ async def _process_message_update(
     if not isinstance(raw_text, str):
         return resource_reply
     text = raw_text
+    if chat.get("type") == "private" and await _is_group_linking_request(database, message, chat_id, text):
+        return _group_linking_help()
     replied_to = message.get("reply_to_message") or {}
     if replied_to.get("text") == HOME_SETUP_SEMESTER_PROMPT and chat.get("type") in {"group", "supergroup"}:
         return await _semester_set_command(
@@ -3027,6 +3038,46 @@ async def _process_message_update(
     if not event:
         return "📚 Course material saved." if resource_saved else None
     return await _save_and_announce_ai_event(database, message, chat_id, update_id, event, now_ms)
+
+
+def _group_linking_help() -> str:
+    return (
+        "🔗 <b>Connect your class group to Academic Assistant</b>\n\n"
+        "1. Add <a href=\"https://t.me/academicgroupmanagementbot\">@academicgroupmanagementbot</a> to your Telegram class group.\n"
+        "2. In that group, send <code>/group_id</code> and copy the ID it returns.\n"
+        "3. Message me privately with <code>/group_setup -100… COLLEGE_INVITE_CODE</code>. "
+        "A college admin must provide the invite code.\n"
+        "4. After it is linked, run <code>/group_setup</code> in the group to review semester and course-topic mappings.\n\n"
+        "I can guide the mapping, but I can’t join or link a group until you add me and submit its ID with a valid college invite code."
+    )
+
+
+async def _is_group_linking_request(database, message: dict, chat_id: str, text: str) -> bool:
+    normalized = re.sub(r"[^a-z0-9 ]", " ", str(text or "").casefold())
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    direct = bool(
+        re.search(r"\b(?:setup|set up|connect|link|attach)\b", normalized)
+        and re.search(r"\b(?:my |the )?group\b", normalized)
+    )
+    contextual = bool(re.search(r"\blink it to (?:u|you|the bot|this bot)\b", normalized))
+    if not direct and not contextual:
+        return False
+    if direct:
+        return True
+    user_id = (message.get("from") or {}).get("id")
+    if type(user_id) is not int or str(user_id) != chat_id:
+        return False
+    try:
+        _preferences, history = await course_tutor_service._read_tutor_context(
+            database, user_id, chat_id, course_tutor_service.PRIVATE_TUTOR_CONTEXT
+        )
+    except Exception:
+        return False
+    recent_user_text = " ".join(
+        str(turn.get("content") or "") for turn in history[-6:]
+        if isinstance(turn, dict) and turn.get("role") == "user"
+    ).casefold()
+    return bool(re.search(r"\b(?:group|telegram chat)\b", recent_user_text) and re.search(r"\b(?:setup|set up|connect|link)\b", recent_user_text))
 
 
 async def _private_tutor_attachment_command(
@@ -3786,6 +3837,9 @@ class Default(WorkerEntrypoint):
             ).bind(expiry_cutoff).run()
             await runtime_env.DB.prepare(
                 "DELETE FROM tutor_followups WHERE created_at_ms <= ?"
+            ).bind(expiry_cutoff).run()
+            await runtime_env.DB.prepare(
+                "DELETE FROM tutor_followup_sets WHERE created_at_ms <= ?"
             ).bind(expiry_cutoff).run()
         await runtime_env.DB.prepare(
             "UPDATE runtime_probe SET last_cron_at = ?, cron_runs = cron_runs + 1 WHERE id = ?"

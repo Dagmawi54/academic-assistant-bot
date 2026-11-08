@@ -34,7 +34,9 @@ class Db:
     def __init__(self):
         self.c = sqlite3.connect(":memory:")
         self.c.row_factory = sqlite3.Row
-        self.c.executescript((Path(__file__).parents[1] / "migrations/0018_tutor_documents.sql").read_text())
+        migrations = Path(__file__).parents[1] / "migrations"
+        self.c.executescript((migrations / "0018_tutor_documents.sql").read_text())
+        self.c.executescript((migrations / "0019_followup_sets.sql").read_text())
 
     def prepare(self, q):
         return Stmt(self, q)
@@ -183,8 +185,9 @@ class FollowupTests(unittest.TestCase):
         raw = "1. Why use sqrt(n) | Why only check up to the square root of the number?\n- Try n = 49 | Can you trace the loop for n = 49?\nbad line\nCommon mistake | What mistake do beginners make with isPrime?"
         items = followups.parse_suggestions(raw)
         self.assertEqual(len(items), 3)
-        kb = followups.keyboard(items, None, truncated=False)
-        self.assertEqual([r[0]["callback_data"] for r in kb["inline_keyboard"]], ["fu:s:0", "fu:s:1", "fu:s:2"])
+        kb = followups.keyboard(items, None, truncated=False, key="a1b2")
+        self.assertEqual([r[0]["callback_data"] for r in kb["inline_keyboard"]], ["fu:s:a1b2:0", "fu:s:a1b2:1", "fu:s:a1b2:2"])
+        self.assertTrue(all(len(r[0]["text"]) <= 24 for r in kb["inline_keyboard"]))
         self.assertNotIn("Continue", str(kb))
 
     def test_continue_only_when_truncated(self):
@@ -199,6 +202,8 @@ class FollowupTests(unittest.TestCase):
         items = run(followups.suggest(Ai(), "is 49 prime", answer))
         self.assertEqual(len(items), 3)
         db = Db()
-        db.c.executescript("CREATE TABLE tutor_followups (user_id INTEGER, chat_id TEXT, items_json TEXT, created_at_ms INTEGER, PRIMARY KEY (user_id, chat_id))") if False else None
-        run(followups.save(db, 7, "7", items, 10))
-        self.assertEqual(run(followups.load(db, 7, "7", 20)), items)
+        db = Db()
+        run(followups.save(db, 7, "7", items, 10, key="a1b2"))
+        run(followups.save(db, 7, "7", [{"label": "Why?", "question": "Why?"}], 11, key="c3d4"))
+        self.assertEqual(run(followups.load(db, 7, "7", 20, key="a1b2")), items)
+        self.assertEqual(run(followups.load(db, 7, "7", 20, key="c3d4"))[0]["label"], "Why?")

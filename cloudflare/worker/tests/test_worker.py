@@ -381,6 +381,39 @@ def test_private_reminder_request_is_handled_before_the_tutor(monkeypatch):
     worker.personal_task_service.create_task.assert_awaited_once()
 
 
+def test_private_group_setup_request_returns_bot_linking_steps_without_tutor(monkeypatch):
+    worker = load_worker(monkeypatch)
+    monkeypatch.setattr(worker, "_save_resource_update", AsyncMock(return_value=(False, None)))
+    monkeypatch.setattr(worker, "_private_tutor_attachment_command", AsyncMock(return_value=None))
+    tutor = AsyncMock(side_effect=AssertionError("group setup request should be routed directly"))
+    monkeypatch.setattr(worker.course_tutor_service, "answer_general_question", tutor)
+
+    reply = asyncio.run(worker._process_message_update(
+        FakeDatabase(), "token", 81,
+        {"chat": {"id": 77, "type": "private"}, "from": {"id": 77}, "text": "How do I set up my group?"},
+        1234, "", "", "academicgroupmanagementbot", object(), "",
+    ))
+
+    assert "/group_id" in reply
+    assert "/group_setup" in reply
+    assert "COLLEGE_INVITE_CODE" in reply
+    tutor.assert_not_awaited()
+
+
+def test_contextual_link_it_to_you_resolves_against_recent_group_setup(monkeypatch):
+    worker = load_worker(monkeypatch)
+    monkeypatch.setattr(worker.course_tutor_service, "_read_tutor_context", AsyncMock(return_value=("", [
+        {"role": "user", "content": "How do I set up my group?"},
+        {"role": "assistant", "content": "Here are generic Telegram group creation steps."},
+    ])))
+
+    result = asyncio.run(worker._is_group_linking_request(
+        FakeDatabase(), {"from": {"id": 77}}, "77", "Link it to u"
+    ))
+
+    assert result is True
+
+
 def test_regular_study_question_skips_task_intent_model(monkeypatch):
     worker = load_worker(monkeypatch)
     parser = AsyncMock(side_effect=AssertionError("ordinary question should skip task classifier"))

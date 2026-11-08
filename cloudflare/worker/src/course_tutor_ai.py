@@ -36,13 +36,14 @@ CORE_TUTOR_INSTRUCTIONS = (
     "- Never invent facts, sources, citations, quotes, or numbers. If evidence is missing or conflicting, say so plainly.\n"
     "- Before answering, silently re-check every calculation, trace, code sample, example, unit, and conclusion. When you show a step-by-step trace (a calculation, algorithm run, state machine, derivation), derive each step strictly from the given rules or data, write each lookup explicitly, and make your verdict follow from the last step of your own trace. If your work contradicts a claim you were about to make, fix the claim.\n"
     "- Use an analogy only when it is accurate, and say where it stops holding. Never reveal private reasoning.\n\n"
-    "- Stay on the student's topic. Never describe yourself, compare yourself to the topic, or add remarks about being an AI or software unless the student asks about you; end the key takeaway on the topic itself.\n\n"
+    "- Stay on topic; mention AI or software only when asked.\n\n"
     "TEACHING\n"
     "- Cover what it is, why it matters, how it works, and when it is used, as far as the question needs. Name needed prerequisites in one line instead of assuming them, define each technical term in plain words the first time you use it, never use a term or technique before it has been introduced, and connect the idea to related concepts. Prefer a realistic example to abstract description, and explain the reasoning behind each step so the student can reproduce the method.\n"
     "- Match depth to the question. A simple factual question gets a direct answer in a few sentences and at most one example. A hard or open-ended topic gets a layered lesson: foundations, then mechanism, then worked example, then pitfalls. Never pad.\n"
     "- Choose the structure that teaches this subject; do not use a fixed template, a numbered list of sections, a generic introduction, or a closing summary that repeats the answer. Typical fits: concept = definition, intuition, example, takeaway; problem = givens, goal, method, working, verified answer; code = idea, code, notes on key lines, expected output, common mistakes; comparison = each side briefly, then similarities, differences, and when to use which.\n"
     "- Add exam insights or practice questions only when they help; offer a hint before a solution when that teaches better.\n\n"
     "CONVERSATION\n"
+    "- Handle casual chat naturally. For group linking, give this bot's setup steps, not generic Telegram advice.\n"
     "- The tutor_request field says how this message relates to the conversation and what to do about it; follow its guidance. Use earlier messages only for continuity: build on them, do not re-teach them unless asked, and ignore anything unrelated to the current question. Earlier assistant messages may be abridged: never copy placeholders, bracketed notes, or lists of covered sections into your answer. If the topic is clear from the conversation, never ask the student to restate it. Items in already_covered were taught before.\n\n"
     "TELEGRAM FORMAT (converted automatically; use only this Markdown)\n"
     "- Short answers need no headings. Long lessons: one `# ` title, `## ` sections, `### ` sub-sections; never `####` or deeper. Never number headings (write `## Why it matters`, not `## 2. Why it matters`).\n"
@@ -1679,10 +1680,32 @@ def hide_code_answers(rendered: str) -> str:
     return _ANSWER_THEN_CODE.sub(fix, rendered)
 
 
+def _protect_practice_answers(text: str) -> str:
+    """Ensure answer keys following a practice prompt stay hidden even if the model drops spoiler markup."""
+    if not re.search(r"(?i)\bpractice\s+(?:question|check|problem)s?\b", text):
+        return text
+
+    def protect(match):
+        label, answer = match.group(1), match.group(2).strip()
+        literal = re.fullmatch(r"(?is)spoiler\s+(.+?)\s+spoiler", answer)
+        if literal:
+            answer = literal.group(1).strip()
+        if answer.startswith("||") and answer.endswith("||"):
+            return match.group(0)
+        return f"{label}||{answer}||" if answer else match.group(0)
+
+    return re.sub(
+        r"(?im)^(\s*(?:\*\*|__)?(?:Answer|Solution):(?:\*\*|__)?\s*)([^\n]+)$",
+        protect,
+        text,
+    )
+
+
 def markdown_to_telegram_html(value: str, citation_links: dict[str, str] | None = None) -> str:
     """Convert readable Markdown to Telegram's supported HTML subset safely."""
     text = re.sub(r"\\\r?\n", "\n", strip_memory_artifacts(value))
     text = re.sub(r"<br\s*/?>", "\n", text.replace("\r\n", "\n").replace("\r", "\n"), flags=re.IGNORECASE)
+    text = _protect_practice_answers(text)
     try:
         rendered = hide_code_answers(_render_markdown_blocks(text))
         if not is_valid_telegram_html(rendered):
@@ -1758,7 +1781,8 @@ def render_general_tutor_answer(
     web_search_no_results: bool = False,
 ) -> str:
     """Escape a general tutor reply and attach only trusted web citations."""
-    safe_answer = markdown_to_telegram_html(str(answer or "")[:MAX_MODEL_ANSWER_CHARS])
+    clean_answer = remove_raw_search_result_leaks(str(answer or ""), web_sources)
+    safe_answer = markdown_to_telegram_html(clean_answer[:MAX_MODEL_ANSWER_CHARS])
     source_lines = []
     citations = {}
     for index, source in enumerate(web_sources[:MAX_SEARCH_RESULTS], 1):
@@ -1780,3 +1804,27 @@ def render_general_tutor_answer(
         sections.append("🌐 I couldn't find reliable live sources for this question; this explanation uses general knowledge.")
     response = "\n\n".join(sections)
     return response
+
+
+def remove_raw_search_result_leaks(answer: str, web_sources: list[dict]) -> str:
+    """Remove model-copied raw result titles/URLs; trusted citations render from source IDs only."""
+    text = str(answer or "")
+    for source in web_sources[:MAX_SEARCH_RESULTS]:
+        url = str(source.get("url") or "").strip()
+        title = str(source.get("title") or "").strip()
+        if not url or url not in text:
+            continue
+        position = text.find(url)
+        if title:
+            title_position = text.casefold().rfind(title.casefold(), 0, position)
+            if title_position >= max(0, position - 400):
+                start = title_position
+                while start > 0 and text[start - 1] not in ".!?\n":
+                    start -= 1
+                suffix = re.sub(r"^[)\]]+", "", text[position + len(url):])
+                if suffix.startswith(".") and start > 0 and text[start - 1] in ".!?":
+                    suffix = suffix[1:]
+                text = text[:start] + suffix
+                continue
+        text = text.replace(url, "")
+    return re.sub(r"[ \t]{2,}", " ", text)
