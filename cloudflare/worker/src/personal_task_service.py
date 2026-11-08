@@ -52,6 +52,8 @@ def looks_like_task_request(text: str) -> bool:
     text = str(text or "")[:2000]
     return bool(re.search(
         r"\bremind\s+me\b|\bmy\s+tasks?\b|"
+        r"\bevery\s+\d+\s*(?:minutes?|mins?|hours?|hrs?|days?|weeks?)\b.*\b(?:tell|send|notify|remind|give|share)\b|"
+        r"\b(?:tell|send|notify|remind|give|share)\b.*\bevery\s+\d+\s*(?:minutes?|mins?|hours?|hrs?|days?|weeks?)\b|"
         r"\b(?:add|save|create|make|set)\s+(?:(?:this|that|a|an)\s+)?"
         r"(?:to\s+my\s+)?(?:tasks?|reminders?)\b|"
         r"\b(?:mark|complete|finish|cancel|delete|reschedule|rename)\s+(?:my\s+)?(?:task|reminder)\b",
@@ -113,9 +115,9 @@ def _parse_relative_reminder(text: str, timezone_name: str, now_ms: int) -> Task
     remainder = text[:match.start()] + " " + text[match.end():]
     command_prefix = (
         r"^\s*(?:(?:can|could|would)\s+(?:you|u)\s+)?(?:please\s+)?"
-        r"(?:(?:put|set|add|create|make)\s+)?(?:a|an)?\s*(?:personal\s+)?"
-        r"(?:reminders?|tasks?)\b(?:\s+for\s+me)?(?:\s+to)?\s*"
-        r"|^\s*remind\s+me(?:\s+to)?\s*"
+        r"(?:(?:put|set|add|create|make)\s+(?:a|an)?\s*)?"
+        r"(?:personal\s+)?(?:reminders?|tasks?)\b(?:\s+for\s+me)?(?:\s+to)?\s*"
+        r"|^\s*(?:(?:can|could|would)\s+(?:you|u)\s+)?(?:please\s+)?remind\s+me(?:\s+to)?\s*"
     )
     for _ in range(2):
         remainder = re.sub(command_prefix, "", remainder, flags=re.IGNORECASE)
@@ -238,6 +240,13 @@ def _extract_json_result(result):
 
 async def parse_task_intent(ai_binding, text: str, timezone_name: str, now_ms: int) -> TaskIntent:
     """Ask the existing Workers AI binding to classify a possible private task request."""
+    recurring = re.search(
+        r"\bevery\s+\d+\s*(?:minutes?|mins?|hours?|hrs?|days?|weeks?)\b.*\b(?:tell|send|notify|remind|give|share)\b|"
+        r"\b(?:tell|send|notify|remind|give|share)\b.*\bevery\s+\d+\s*(?:minutes?|mins?|hours?|hrs?|days?|weeks?)\b",
+        str(text or ""), re.IGNORECASE,
+    )
+    if recurring:
+        return TaskIntent(action="unsupported_recurring")
     if ai_binding is None or not isinstance(text, str) or not text.strip():
         return TaskIntent(action="not_task_request")
     relative = _parse_relative_reminder(text, timezone_name, now_ms)

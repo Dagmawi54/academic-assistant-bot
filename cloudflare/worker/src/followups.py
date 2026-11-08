@@ -10,7 +10,7 @@ import course_tutor_ai
 logger = logging.getLogger("academic_assistant_followups")
 
 MAX_SUGGESTIONS = 3
-LABEL_CHARS = 18
+LABEL_CHARS = 10
 QUESTION_CHARS = 200
 TTL_MS = 24 * 3600 * 1000
 CONTINUE_PROMPT = (
@@ -32,10 +32,42 @@ def parse_suggestions(raw: str) -> list[dict]:
             continue
         label, question = (part.strip(" *`\"") for part in line.split("|", 1))
         if 3 <= len(label) and 8 <= len(question):
-            items.append({"label": label[:LABEL_CHARS].rstrip(" .…"), "question": question[:QUESTION_CHARS]})
+            items.append({"label": _button_label(label, question), "question": question[:QUESTION_CHARS]})
         if len(items) == MAX_SUGGESTIONS:
             break
     return items
+
+
+def _button_label(label: str, question: str) -> str:
+    """Use short, readable actions; keep the full contextual question behind the button."""
+    normalized = f"{label} {question}".casefold()
+    if re.search(r"\b(?:why|cause|reason|how does|how do)\b", normalized):
+        return "Why?"
+    if re.search(r"\b(?:example|examples|for instance|sample|demonstrate)\b", normalized):
+        return "Example"
+    if re.search(r"\b(?:apply|use this|try|work through)\b", normalized):
+        return "Apply"
+    if re.search(r"\b(?:compare|difference|versus|vs)\b", normalized):
+        return "Compare"
+    if re.search(r"\b(?:check|understand|mistake|quiz|test yourself)\b", normalized):
+        return "Check"
+    if re.search(r"\bwhat if\b", normalized):
+        return "What if?"
+    return "Explore"
+
+
+def _relevant_suggestions(items: list[dict], question: str, answer: str) -> list[dict]:
+    """Drop follow-ups that introduce a subject absent from both the question and its answer."""
+    context = set(course_tutor_ai._content_terms(f"{question} {answer[:1600]}"))
+    relevant = []
+    for item in items:
+        terms = set(course_tutor_ai._content_terms(item.get("question", "")))
+        shared = context.intersection(terms)
+        # One generic word such as “model” or “law” is not enough to establish
+        # that a suggested button belongs to this answer. Omit weak suggestions.
+        if shared and (len(shared) >= 2 or any(len(term) >= 6 for term in shared)):
+            relevant.append(item)
+    return relevant[:MAX_SUGGESTIONS]
 
 
 async def suggest(ai_binding, question: str, answer_html: str) -> list[dict]:
@@ -45,12 +77,13 @@ async def suggest(ai_binding, question: str, answer_html: str) -> list[dict]:
         return []
     messages = [
         {"role": "system", "content": (
-            "You suggest what a student would naturally ask NEXT after reading the answer below. Write exactly 3 "
-            "follow-up questions that refer to specific things the answer mentioned (a term, step, example or "
-            "code line), each of a different kind: one that digs into why/how, one that applies it to an example "
-            "or exercise, one that checks understanding or covers a common mistake. Never suggest something the "
-            "answer already covered. Output only 3 lines, each: short button label (max 30 characters) | the full "
-            "question written in the student's voice. No numbering, no extra text. Reply in the student's language."
+            "Write up to 3 useful next questions about ONLY the subject, terms, examples, and steps explicitly present "
+            "in the student's question or answer. Never switch to another subject, invent a new application, or ask "
+            "something the answer already covered. Each full question must name or clearly refer to one concept from "
+            "the supplied answer. Prefer one why/how question, one worked-example question, and one understanding "
+            "check when they fit; omit a type if it would be forced or unrelated. Output one line per question: "
+            "short action label | full natural question. Labels must be 10 characters or fewer. No numbering or extra text. "
+            "Reply in the student's language."
         )},
         {"role": "user", "content": json.dumps({"student_question": str(question)[:300], "answer": excerpt}, ensure_ascii=False)},
     ]
@@ -61,7 +94,8 @@ async def suggest(ai_binding, question: str, answer_html: str) -> list[dict]:
     try:
         result = await ai_binding.run(course_tutor_ai.TUTOR_MODEL, payload)
         text, _ = course_tutor_ai._completion_parts(result)
-        return parse_suggestions(text or "")
+        items = parse_suggestions(text or "")
+        return _relevant_suggestions(items, question, excerpt)
     except Exception as exc:
         logger.info("followup_suggestions_failed %s", type(exc).__name__)
         return []

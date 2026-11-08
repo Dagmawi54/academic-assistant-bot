@@ -99,8 +99,10 @@ REQUEST_GUIDANCE = {
         "(answers in spoilers) and offer the next stage."
     ),
     "example": (
-        "The student wants concrete examples. Lead with a realistic worked example, annotate each step, then show how it "
-        "generalizes. Keep theory minimal."
+        "The student wants an example of the topic just discussed. Use the immediately preceding assistant explanation and "
+        "tutor_request.topic as the source of the example. Demonstrate that exact topic and explain how each step applies. "
+        "Never switch to a different subject or substitute a generic example from another field (for example, do not answer "
+        "a Hubble's Law follow-up with linear regression). Keep theory minimal."
     ),
     "solve": (
         "The student wants a specific problem solved. Use givens, goal, method, numbered working, and a verified final "
@@ -505,6 +507,7 @@ def analyze_request(question: str, conversation_history=None) -> TutorRequest:
         ))
     )
     same_topic = (not content and bare_followup) or bool(overlap)
+    short_example_followup = bool(_EXAMPLE_CUES.search(norm)) and len(content) <= 3
     kind = "new"
     if repeated:
         kind = "repeat"
@@ -518,7 +521,7 @@ def analyze_request(question: str, conversation_history=None) -> TutorRequest:
         kind = "deepen"
     elif len(content) <= 3 and same_topic and _SIMPLIFY_CUES.search(norm):
         kind = "simplify"
-    elif len(content) <= 3 and same_topic and _EXAMPLE_CUES.search(norm):
+    elif short_example_followup:
         kind = "example"
     elif anaphoric or (overlap and len(content) <= 3):
         kind = "followup"
@@ -538,7 +541,9 @@ def analyze_request(question: str, conversation_history=None) -> TutorRequest:
         # Feedback is about the previous answer, whatever words it happens to share with it.
         return _finalize(kind, previous_topic, [turn for group in recent for turn in group], previous_topic, learner)
 
-    own_topic = bool(content)
+    # Short requests like “give me a worked example” can contain a stray content
+    # word (“worked”) while still referring to the preceding lesson.
+    own_topic = bool(content) and not (kind == "example" and len(content) <= 3)
     topic = text[:160] if (own_topic and kind != "repeat") else previous_topic
     if kind == "repeat":
         topic = previous_topic if not own_topic or _REPEAT_CUES.search(norm) else text[:160]
