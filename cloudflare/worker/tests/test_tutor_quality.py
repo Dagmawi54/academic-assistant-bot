@@ -280,6 +280,11 @@ class RequestAnalysisTests(unittest.TestCase):
     def test_example_request(self):
         self.assertEqual(self.kind("Give me an example").kind, "example")
 
+    def test_bare_example_without_a_lesson_asks_for_a_topic(self):
+        request = ai.analyze_request("Give me a worked example", [])
+        self.assertEqual(request.kind, "example")
+        self.assertEqual(request.example_subject, "")
+
     def test_bare_example_is_anchored_to_the_latest_lesson(self):
         history = [
             {"role": "user", "content": "Tell me how the universe was created"},
@@ -378,6 +383,48 @@ class BudgetTests(unittest.TestCase):
 
     def test_math_problem_is_deep(self):
         self.assertEqual(self.budget("Solve 3x + 5 = 20 for x"), ai.TUTOR_DEEP_COMPLETION_TOKENS)
+
+
+class ExampleAnswerGuardTests(unittest.TestCase):
+    HISTORY = [
+        {"role": "user", "content": "How does that relate to Hubble's Law?"},
+        {"role": "assistant", "content": "# Connecting the Big Bang to Hubble's Law\n\nHubble's Law relates distance and recession speed."},
+    ]
+    WRONG = "## Worked Example: Doppler Effect\nCalculate the speed of a train from its whistle."
+    CORRECT = "## Worked Example: Hubble's Law\nUse v = H0 × d to calculate a galaxy's recession speed."
+
+    def messages(self, history=HISTORY):
+        request = ai.analyze_request("Give me a worked example", history)
+        return ai.build_general_tutor_messages("Give me a worked example", [], conversation_history=history, request_analysis=request)
+
+    def test_off_topic_draft_is_retried_and_corrected(self):
+        model = ScriptedAI(self.WRONG, self.CORRECT)
+        previews = []
+
+        answer = run(ai.generate_tutor_answer(model, self.messages(), on_partial=previews.append))
+
+        self.assertIn("Hubble's Law", answer)
+        self.assertNotIn("Doppler", answer)
+        self.assertEqual(len(model.calls), 2)
+        self.assertIn("rewrite", model.calls[1]["messages"][-1]["content"].casefold())
+        self.assertEqual(previews, [answer])
+
+    def test_second_off_topic_draft_is_replaced_with_clarification(self):
+        model = ScriptedAI(self.WRONG, self.WRONG)
+
+        answer = run(ai.generate_tutor_answer(model, self.messages()))
+
+        self.assertNotIn("Doppler", answer)
+        self.assertIn("Which lesson", answer)
+        self.assertEqual(len(model.calls), 2)
+
+    def test_no_context_returns_clarification_without_calling_model(self):
+        model = ScriptedAI(self.WRONG)
+
+        answer = run(ai.generate_tutor_answer(model, self.messages([])))
+
+        self.assertIn("Which topic", answer)
+        self.assertEqual(model.calls, [])
 
 
 PYTHON_REQUEST = "I want you to teach me python from the beginning up to creating a small system"

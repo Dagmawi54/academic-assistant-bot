@@ -293,7 +293,7 @@ _STOPWORDS = frozenset(
     "isnt wasnt werent arent dont didnt doesnt cant wont couldnt shouldnt wouldnt thats im ive want wanna".split()
 )
 _CUE_WORDS = frozenset(
-    "deeper deep detail details depth detailed elaborate expand simpler simple simply easier easy example "
+    "deeper deep detail details depth detailed elaborate expand simpler simple simply easier easy example worked "
     "examples instance sample demonstrate illustrate again continue eli5 layman beginner beginners plain friendly "
     "hard difficult complicated complex confusing technical dense jargon terms term new beginning start scratch huh".split()
 )
@@ -311,7 +311,7 @@ _DEEPEN_CUES = re.compile(
     r"\b(?:(?:go|dig|dive|delve) (?:deeper|further)|deeper|(?:more|extra) (?:depth|details?|in depth|advanced|technical|thorough)"
     r"|in (?:more )?(?:depth|detail)|elaborate|expand(?: on)?|tell me more|under the hood|internals?|behind the scenes)\b"
 )
-_EXAMPLE_CUES = re.compile(r"\b(?:examples?|for instance|e g|demonstrate|demo|sample|use cases?|illustrate|real world)\b")
+_EXAMPLE_CUES = re.compile(r"\b(?:worked examples?|examples?|for instance|e g|demonstrate|demo|sample|use cases?|illustrate|real world)\b")
 _SOLVE_CUES = re.compile(
     r"\b(?:solve|calculate|compute|evaluate|work out|trace|simulate|dry run|verify|prove|derive"
     r"|find the (?:value|answer|output|result|solution|area|volume|probability|derivative|integral|sum|product|average|mean)"
@@ -516,6 +516,10 @@ def analyze_request(question: str, conversation_history=None) -> TutorRequest:
     roadmap = bool(_ROADMAP_CUES.search(norm) and re.search(r"\b(?:teach|learn|course|study|master|guide|plan)\b", norm))
     base_query = text[:MAX_QUERY_CHARS]
     if not exchanges:
+        # A bare example request needs an active lesson to attach to. If there is
+        # no lesson in memory, ask for its subject instead of inventing one.
+        if _EXAMPLE_CUES.search(norm) and not content:
+            return _finalize("example", "", [], base_query, learner)
         kind = "roadmap" if roadmap else "solve" if solve else "new"
         return _finalize(kind, text[:160] if kind != "new" else "", [], base_query, learner)
 
@@ -1069,6 +1073,47 @@ def consistency_note(question: str, answer: str = "") -> str:
     return f"\n\nVerification: following the transition table gives {' \u2192 '.join(path)}.{verdict}"
 
 
+_GENERIC_EXAMPLE_SUBJECT_TERMS = frozenset(
+    "connect connecting related relates relate worked example examples overview introduction simple idea guide lesson "
+    "definition explain explanation topic concept deep dive into about the".split()
+)
+
+
+def _example_request_context(messages: list[dict[str, str]]) -> tuple[str, str, list[str]]:
+    """Read the example request's topic anchor from the structured prompt payload."""
+    try:
+        payload = json.loads(str(messages[-1].get("content") or "{}"))
+        request = payload.get("tutor_request") if isinstance(payload, dict) else None
+        if not isinstance(request, dict) or request.get("type") != "example":
+            return "", "", []
+    except (TypeError, ValueError, AttributeError, IndexError):
+        return "", "", []
+    subject = str(request.get("example_subject") or "").strip()[:200]
+    topic = str(request.get("topic") or "").strip()[:200]
+    subject_terms = [
+        term for term in _content_terms(subject)
+        if term not in _GENERIC_EXAMPLE_SUBJECT_TERMS
+    ]
+    topic_terms = [
+        term for term in _content_terms(topic)
+        if term not in _GENERIC_EXAMPLE_SUBJECT_TERMS
+    ]
+    # Prefer terms present in both the previous question and its answer title.
+    # They are the most reliable, topic-specific anchor for this follow-up.
+    anchors = list(dict.fromkeys(term for term in topic_terms if term in subject_terms))
+    if not anchors:
+        anchors = list(dict.fromkeys(subject_terms))
+    return subject, topic, anchors
+
+
+async def _publish_partial(on_partial, answer: str) -> None:
+    if not on_partial:
+        return
+    result = on_partial(answer)
+    if hasattr(result, "__await__"):
+        await result
+
+
 async def generate_tutor_answer(
     ai_binding,
     messages: list[dict[str, str]],
@@ -1077,6 +1122,17 @@ async def generate_tutor_answer(
     """Generate a checked answer; stream private-chat previews and finish length-stopped output once."""
     if on_partial is None:
         on_partial = getattr(ai_binding, "on_partial", None)
+    example_subject, _example_topic, example_anchors = _example_request_context(messages)
+    try:
+        final_payload = json.loads(str(messages[-1].get("content") or "{}"))
+        final_request = final_payload.get("tutor_request") if isinstance(final_payload, dict) else None
+    except (TypeError, ValueError, AttributeError, IndexError):
+        final_request = None
+    is_example_request = isinstance(final_request, dict) and final_request.get("type") == "example"
+    if is_example_request and not example_subject:
+        clarification = "Which topic would you like a worked example for?"
+        await _publish_partial(on_partial, clarification)
+        return tag_text(clarification, False)
     token_budget = tutor_completion_budget(messages)
 
     async def run_once(request_messages, budget, stream=False):
@@ -1093,7 +1149,9 @@ async def generate_tutor_answer(
 
     finish_reason = None
     answer = None
-    if on_partial:
+    # Hold example answers until the subject validator approves them; otherwise a
+    # drifting draft could be visible in the progressive preview before we reject it.
+    if on_partial and not is_example_request:
         try:
             stream = await run_once(messages, token_budget, stream=True)
             answer, finish_reason = await _read_ai_stream(stream, on_partial=on_partial)
@@ -1141,10 +1199,44 @@ async def generate_tutor_answer(
 
     if answer:
         answer = strip_memory_artifacts(answer)
+    if answer and is_example_request:
+        if not example_anchors:
+            answer = "I couldn't identify the lesson topic from our recent messages. Which lesson should I use for the worked example?"
+            finish_reason = "stop"
+        elif not (set(example_anchors) & set(_content_terms(answer[:1600]))):
+            # A model can drift to a related but different subject even when the
+            # prompt contains the correct context. Reject that draft before it is
+            # delivered, then make one low-cost repair attempt.
+            correction = (
+                f"Your previous draft was off-topic. Rewrite it as a worked example about the exact lesson subject: "
+                f"{example_subject}. Keep the example tied to that subject and do not substitute a related concept. "
+                "If the conversation does not provide enough information to do this accurately, ask one brief clarifying question."
+            )
+            try:
+                repaired_result = await run_once([
+                    *messages,
+                    {"role": "assistant", "content": answer},
+                    {"role": "user", "content": correction},
+                ], token_budget)
+                repaired, repaired_finish_reason = _completion_parts(repaired_result)
+                repaired = strip_memory_artifacts(repaired or "")
+            except Exception:
+                repaired, repaired_finish_reason = "", None
+            if repaired and set(example_anchors) & set(_content_terms(repaired[:1600])):
+                answer = repaired
+                finish_reason = repaired_finish_reason
+            else:
+                answer = "I lost the lesson topic while preparing that example. Which lesson should I use?"
+                finish_reason = "stop"
     if answer:
-        answer = await _verify_and_repair(messages, answer, run_once, token_budget, on_partial)
+        answer = await _verify_and_repair(
+            messages, answer, run_once, token_budget,
+            None if is_example_request else on_partial,
+        )
     if not answer:
         return None
+    if is_example_request:
+        await _publish_partial(on_partial, answer)
     cut = finish_reason in {"length", "max_tokens", "max_completion_tokens"} or len(answer) > MAX_MODEL_ANSWER_CHARS
     return tag_text(answer[:MAX_MODEL_ANSWER_CHARS].strip() or None, cut)
 
